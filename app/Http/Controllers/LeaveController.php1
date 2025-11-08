@@ -1,0 +1,808 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
+use Carbon\Carbon;
+use Illuminate\Database\QueryException;
+use Exception;
+use App\Traits\StaffTraits;
+use App\Traits\TaskTraits;
+class LeaveController extends Controller
+{
+    use StaffTraits;
+    use TaskTraits;
+    public function fetch_leave_type(Request $request)
+    {
+        try {
+            $leaveType = DB::table('leave_type')->get();
+            return response()->json(['status' => 'success', 'leaveType' => $leaveType]);
+        } catch (Exception $th) {
+            Log::error($th->getMessage());
+            return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 200);
+        }
+    }
+    public function leave_table_save(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+            'from_date' => 'required',
+            'to_date' => 'required',
+            'remark' => 'required|string',
+            'staff_id' => 'required',
+            'leave_id' => 'required',
+            'company' => 'required',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        try {
+            $days = date_diff(date_create($request->from_date), date_create($request->to_date));
+            if ($days->format("%R%a") > -1) {
+                $leaveType = DB::table('leave_table')->insert([
+                    'leave_id' => $request->leave_id,
+                    'staff_id' => $request->staff_id,
+                    'start_date' => $request->from_date,
+                    'end_date' => $request->to_date,
+                    'days' => $days->format("%a"),
+                    'reason' => $request->remark,
+                    'company' => $request->company,
+                    'status' => 'Pending'
+                ]);
+                return response()->json(['status' => 'success', 'msg' => 'Record saved succesfully']);
+            } else {
+                return response()->json(['status' => 'error', 'msg' => 'Date Entered should be after the start date'], 200);
+            }
+        } catch (Exception $th) {
+            Log::error($th->getMessage());
+            return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+        }
+    }
+    public function leave_table_update(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            'id' => 'required|numeric',
+            'from_date' => 'required',
+            'to_date' => 'required',
+            'remark' => 'required|string',
+            'staff_id' => 'required',
+            'leave_id' => 'required',
+            'company' => 'required',
+            'status' => 'required',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        try {
+            $days = date_diff(date_create($request->from_date), date_create($request->to_date));
+            if ($days->format("%R%a") > -1) {
+                $updateLeave =   DB::table('leave_table')->where('id', $request->id)->update([
+                    'leave_id' => $request->leave_id,
+                    'staff_id' => $request->staff_id,
+                    'start_date' => $request->from_date,
+                    'end_date' => $request->to_date,
+                    'days' => $days->format("%a"),
+                    'reason' => $request->remark,
+                    'company' => $request->company,
+                    'status' => $request->status
+                ]);
+                return response()->json(['status' => 'success', 'msg' => 'Record Updated succesfully']);
+            } else {
+                return response()->json(['status' => 'error', 'msg' => 'Date Entered should be after the start date'], 200);
+            }
+        } catch (Exception $th) {
+            Log::error($th->getMessage());
+            return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+        }
+    }
+    public function fetch_leave_table(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+            'staff_id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        try {
+            $leaveType = DB::table('leave_table')
+                ->join('leave_type', 'leave_table.leave_id', '=', 'leave_type.id')
+                ->where('staff_id', '=', $request->staff_id)
+                ->select('leave_table.*', 'leave_type.type')
+                ->orderBy('leave_table.start_date', 'desc')
+                ->get();
+            if (count($leaveType) == 0) {
+                return response()->json([
+                    'status' => 'success',
+                    'msg' => 'no data found',
+                ], 200);
+            }
+            $applied = substr($leaveType[0]->created_at, 0, 10);
+            return response()->json([
+                'status' => 'success',
+                'leave_type' => $leaveType,
+            ], 200);
+        } catch (Exception $th) {
+            Log::error($th->getMessage());
+            return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+        }
+    }
+    public function delete_leave_records(Request $request)
+    {
+        DB::table('leave_table')->delete();
+        return response()->json(['status' => 'success', 'msg' => 'Records Deleted'], 200);
+    }
+    public function delete_leave_records_id(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+            'id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        DB::table('leave_table')->where('id', $request->id)->delete();
+        return response()->json(['status' => 'success', 'msg' => 'Records Deleted'], 200);
+    }
+    public function reschedule_leave_record(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+            'id' => 'required|string',
+            'start_date' => 'required',
+            'end_date' => 'required',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $days = date_diff(date_create($request->start_date), date_create($request->end_date));
+            if ($days->format("%R%a") > -1) {
+                DB::table('leave_table')->where('id', $request->id)->update([
+                    'start_date' => $request->start_date,
+                    'end_date' => $request->end_date,
+                    'days' => $days->format("%a"),
+                ]);
+                return response()->json(['status' => 'success', 'msg' => 'Records Updated'], 200);
+            } else {
+                return response()->json(['status' => 'error', 'msg' => 'Date Entered should be after the start date'], 200);
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+        }
+    }
+    public function approve_reject_leave(Request $request)
+    {
+        try {
+            $value = $request->value;
+            $id = $request->id;
+            $status_update = DB::table('leave_table')->where('id', $id)->update([
+                'status' => $value
+            ]);
+
+            if ($status_update) {
+                return json_encode(array('status' => 'success', 'msg' => 'Leave ' . $value . ' ' . 'successfully'));
+            } else {
+                return response()->json(['status' => 'error', 'msg' => 'Can`t be ' . $value]);
+            }
+        } catch (Exception $th) {
+            Log::error($th->getMessage());
+            return response()->json(['status' => 'error', 'msg' => $th->getMessage()], 500);
+        }
+    }
+
+    public function staff_leave()
+    {
+        try {
+            if (session('username') == "") {
+                return redirect('/')->with('status', "Please login First");
+            }
+
+            $staff = $this->get_staff_list_userid();
+            return view('pages.staff_leave', compact('staff'));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+        }
+    }
+
+    public function edit_staff_leave(Request $request)
+    {
+        try {
+            $leave_type = DB::table('leave_type')->get();
+            $leave_id = $request->leave_type;
+            $id = $request->id;
+            $start_date = date('Y-m-d', strtotime($request->start_date));
+            $end_date = date('Y-m-d', strtotime($request->end_date));
+            $update = DB::table('leave_table')->where('id', $id)->update([
+                'leave_id' => $leave_id,
+                'start_date' => $start_date,
+                'end_date' => $end_date,
+                'updated_at' => now()
+            ]);
+            if ($update) {
+                return json_encode(array('status' => 'success', 'msg' => 'Staff leave updated successfully!'));
+            } else {
+                return json_encode(array('status' => 'error', 'msg' => 'Staff leave can not be updated'));
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function delete_staff_leave(Request $request)
+    {
+        try {
+            $id = $request->id;
+
+            $delete = DB::table('leave_table')->where('id', $id)->delete();
+
+            if ($delete) {
+                return json_encode(array('status' => 'success', 'msg' => 'Staff leave delete successfully!'));
+            } else {
+                return json_encode(array('status' => 'error', 'msg' => 'Staff leave can not be deleted'));
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_pending_leaves(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+
+            'company_id' => 'required',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        try {
+            $company_id = $request->company_id;
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->join('role', 'role.id', 'users.role_id')
+                ->where('users.status', 'active')
+                ->select('staff.*', 'users.role_id', 'role.role')
+                ->get();;
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == $company_id) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $pending_leaves = DB::table('leave_table')
+                ->join('leave_type', 'leave_type.id', 'leave_table.leave_id')
+                ->join('staff', 'staff.sid', 'leave_table.staff_id')
+                ->select('leave_table.*', 'leave_type.type', 'staff.name')
+                ->where('leave_table.status', 'Approved')
+                ->whereIn('leave_table.staff_id', $staff_id)
+                ->where('leave_table.company', $company_id)
+                ->orderBy('leave_table.start_date', 'desc')
+                ->get();
+
+            return response()->json(['status' => 'success', 'data' => $pending_leaves]);
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function pending_leaves()
+    {
+        try {
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->join('role', 'role.id', 'users.role_id')
+                ->where('users.status', 'active')
+                ->select('staff.*', 'users.role_id', 'role.role')
+                ->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+            $pending_leaves = DB::table('leave_table')
+                ->join('leave_type', 'leave_type.id', 'leave_table.leave_id')
+                ->join('staff', 'staff.sid', 'leave_table.staff_id')
+                ->select('leave_table.*', 'leave_type.type', 'staff.name')
+                ->where('leave_table.status', 'Pending')
+                ->whereIn('leave_table.staff_id', $staff_id)
+                ->where('leave_table.company', session('company_id'))
+                ->orderBy('leave_table.start_date', 'desc')
+                ->get();
+            $leave_type = DB::table('leave_type')->get();
+            return view('pages.leave.pending_leave', compact('pending_leaves', 'leave_type'));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        }
+    }
+
+    public function approved_leaves()
+    {
+        try {
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->join('role', 'role.id', 'users.role_id')
+                ->where('users.status', 'active')
+                ->select('staff.*', 'users.role_id', 'role.role')
+                ->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+            $approved_leaves = DB::table('leave_table')
+                ->join('leave_type', 'leave_type.id', 'leave_table.leave_id')
+                ->join('staff', 'staff.sid', 'leave_table.staff_id')
+                ->select('leave_table.*', 'leave_type.type', 'staff.name')
+                ->where('leave_table.status', 'Approved')
+                ->whereIn('leave_table.staff_id', $staff_id)
+                ->where('leave_table.company', session('company_id'))
+                ->orderBy('leave_table.start_date', 'desc')
+                ->get();
+
+            return view('pages.leave.approved_leave', compact('approved_leaves'));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        }
+    }
+
+    public function rejected_leaves()
+    {
+        try {
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->join('role', 'role.id', 'users.role_id')
+                ->where('users.status', 'active')
+                ->select('staff.*', 'users.role_id', 'role.role')
+                ->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+            $rejected_leaves = DB::table('leave_table')
+                ->join('leave_type', 'leave_type.id', 'leave_table.leave_id')
+                ->join('staff', 'staff.sid', 'leave_table.staff_id')
+                ->select('leave_table.*', 'leave_type.type', 'staff.name')
+                ->where('leave_table.status', 'Rejected')
+                ->whereIn('leave_table.staff_id', $staff_id)
+                ->where('leave_table.company', session('company_id'))
+                ->orderBy('leave_table.start_date', 'desc')
+                ->get();
+
+            return view('pages.leave.rejected_leave', compact('rejected_leaves'));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        }
+    }
+
+    // public function show_statistics(Request $request)
+    // {
+    //     try {
+    //         log::info($request);
+    //         $month = $request->month;
+    //         $year = $request->year;
+           
+    //         $staff = DB::table('staff')
+    //         ->join('users', 'users.user_id', 'staff.sid')
+    //         ->join('role', 'role.id', 'users.role_id')
+    //         ->where('users.status', 'active')
+    //          ->select('staff.sid', 'staff.company', 'staff.name')
+    //         ->get();
+    //     $leave_type_id=DB::table('leave_table')->distinct()->pluck('leave_id');
+    //     $leaveTypes = DB::table('leave_type')->whereIn('id',$leave_type_id)->get(['type', 'id']);
+    //     $leaveTypeTotalsByStaff = [];
+
+    //     $staff_leave=array();$leave_array=array();
+       
+    //     foreach ($staff as $stf) {
+            
+    //         $stf->total_leaves=DB::table('staff_leave')->where('staff_id',$stf->sid)->sum('total_leaves');
+    //         $staff_id=$stf->sid;
+            
+    //        foreach($leaveTypes as $leavetyp)
+    //        {
+    //         $total_leave_days=0;
+    //          $count_type=DB::table('staff_leave')->where('staff_id',$stf->sid)->where('leave_type',$leavetyp->id)->count();
+    //          if($count_type>0)
+    //          {
+    //             $staff_leave[$leavetyp->type.' available']=DB::table('staff_leave')->where('staff_id',$stf->sid)->where('leave_type',$leavetyp->id)->value('total_leaves');
+    //          }
+    //          else
+    //          {
+    //             $staff_leave[$leavetyp->type.' available']=0;
+    //          }
+    //          $leaveid=$leavetyp->id;
+    //          $leave_type=$leavetyp->type;
+            
+    //           $leave=DB::table('leave_table')
+    //          ->where(function ($query) use ($staff_id,$leaveid,$month,$year) {
+    //            $query->where('staff_id',$staff_id)
+    //                 ->where('leave_id',$leaveid)
+    //                 ->where('status','Approved')
+    //                 ->whereMonth('start_date',$month)
+    //                 ->whereYear('start_date',$year);
+    //         })->orWhere(function ($query) use ($staff_id,$leaveid,$month,$year) {
+    //             $query->where('staff_id',$staff_id)
+    //             ->where('leave_id',$leaveid)
+    //             ->where('status','Approved')
+    //             ->whereMonth('end_date',$month)
+    //             ->whereYear('end_date',$year);
+    //         })->get(['start_date','end_date']);
+    //         if(sizeof($leave)>0)
+    //         {
+    //             foreach($leave as $lea)
+    //             {
+    //                $total_leave_days+= $this->getAllDates($lea->start_date, $lea->end_date,$month,$year);
+    //                $leave_array[$leave_type.' taken']=$total_leave_days;
+
+                   
+    //             }
+    //         }
+    //         else
+    //         {
+    //             $leave_array[$leave_type.' taken']=0;
+    //         }
+            
+    //      }
+        
+    //       $stf->leave_available=$staff_leave;
+    //       $stf->leave_taken=  $leave_array;
+    //     }
+       
+    //         return view('pages.leave.statistics_leave', compact('staff', 'leaveTypes'));
+    //     } catch (\Throwable $e) {
+    //         Log::error("Database error ! [" . $e->getMessage() . "]");
+    //         return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+    //     } catch (Exception $e) {
+    //         Log::error($e->getMessage());
+    //         return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+    //     }
+    // }
+    public function show_statistics(Request $request)
+    {
+        try {
+            log::info($request);
+            $month = $request->month;
+            $year = $request->year;
+            $start_date = $year . '-' . $month . '-01';
+                $d = cal_days_in_month(CAL_GREGORIAN, $month, $year);
+                $end_date = $year . '-' . $month . '-' . $d;
+                $filter = array($start_date, $end_date);
+                for ($i = 1; $i <= $d; $i++) {
+                    $day = (strlen($i) == 1) ? '0' . $i : $i; // To add leading zero to the date
+                    $month = (strlen($month) == 1) ? '0' . $month : $month; // To add leading zero to the month
+
+                    $dates[] = $year . '-' . $month . '-' . $day;
+                }
+                
+            $staff = DB::table('staff')
+            ->join('users', 'users.user_id', 'staff.sid')
+            ->join('role', 'role.id', 'users.role_id')
+            ->where('users.status', 'active')
+             ->select('staff.sid', 'staff.company', 'staff.name')
+            ->get();
+        $leave_type_id=DB::table('leave_table')->distinct()->pluck('leave_id');
+        $leaveTypes = DB::table('leave_type')->whereIn('id',$leave_type_id)->get(['type', 'id']);
+        $leaveTypeTotalsByStaff = [];
+
+        $staff_leave=array();$leave_array=array();
+       
+        foreach ($staff as $stf) {
+              
+            $sift_end=DB::table('staff_shift')->where('staff_id',$stf->sid)->value('to_time');
+            $working_hr=DB::table('staff_shift')->where('staff_id',$stf->sid)->value('total_working_hours');
+            $sift_start=DB::table('staff_shift')->where('staff_id',$stf->sid)->value('from_time');
+            $staff_id=$stf->sid;
+            $stf->total_leaves=DB::table('staff_leave')->where('staff_id',$stf->sid)->sum('total_leaves');
+            $total_leave=0;$total_half_day=0;$total_quarter_day=0;$total_not_mark=0;$total_late_mark=0;
+            for ($d = 0; $d < sizeof($dates); $d++) {
+                
+                $check = '';
+                $list[$dates[$d]] = DB::table('attendance')
+                   
+                    ->where('staff_id', $stf->sid)
+                    ->where('signin_date', $dates[$d])->orderBy('signin_date', 'desc')->get(['signin_date', 'signin_time', 'signout_date', 'signout_time','signin_location','signout_location','signin_address','signout_address']);
+
+
+                if (
+                    $list[$dates[$d]] != '[]'
+                ) {
+                    foreach ($list[$dates[$d]] as $row) {
+
+                        $signin_date = $row->signin_date;
+                        $signin_time = $row->signin_time;
+                        $signout_date = $row->signout_date;
+                        $signout_time = $row->signout_time;
+                        $signin_location = $row->signin_location;
+                        $signin_address = $row->signin_address;
+                         $signout_location = $row->signout_location;
+                        $signout_address = $row->signout_address;
+                        $remark='';$sift='';
+                        if ($signout_time == "") {
+                            $total_working_hr = '';
+                            $remark = "Not Marked";
+                            $total_not_mark+=1;
+                        } else {
+                            $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                            $hour = intval($diff / 60);
+                            $half_hr=$working_hr/2;
+                            $minute = $diff % 60;
+                            $time = $hour . '.' . $minute;
+                            $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            
+                            
+                           
+                            if($sift_start=='9:30 AM')
+                            {
+                                $sift='9:45 AM';
+                                
+                                
+                               
+                                
+                                if((strtotime($row->signin_time) > strtotime('9:30 AM')) && (strtotime($row->signin_time) <= strtotime('9:45 AM')))
+                                {
+                                    $total_late_mark+=1;
+                                    $remark='Late Mark';
+                                }
+                              
+                            }
+                            else
+                            {
+                                $sift=$sift_start;
+                            }
+                            $diff_in_time = intval((strtotime($row->signin_time) - strtotime($sift)) / 60);
+                            $hour_in_time = intval($diff_in_time / 60);
+                            $minute_in_time = $diff_in_time % 60;
+                            $in_time = $hour_in_time . '.' . $minute_in_time;
+
+                            $diff_out_time = intval((strtotime($sift_end) - strtotime($row->signout_time)) / 60);
+                            $hour_out_time = intval($diff_out_time / 60);
+                            $minute_out_time = $diff_out_time % 60;
+                            $out_time = $hour_out_time . '.' . $minute_out_time;
+                        
+                           
+                            if (strtotime($signin_time) > strtotime($sift) && strtotime($row->signout_time) < strtotime($sift_end)) {
+                              
+                                $total_time=$out_time+$in_time;
+                                if($total_time>0 && $total_time<=2)
+                                {
+                                    $remark='Quarter Day';
+                                    $total_quarter_day+=1;
+                                }
+                                if($total_time>2 && $total_time<=4)
+                                {
+                                    $remark='Half day';
+                                    $total_half_day+=1;
+                                }
+                            }
+                        
+                        else {
+                          
+                            if (strtotime($signin_time) > strtotime($sift) || strtotime($row->signout_time) < strtotime($sift_end)) 
+                            {
+                              
+                            
+                            if(($in_time>0 && $in_time<=2) || ($out_time>0 && $out_time<=2))
+                            {
+                               
+
+                                $remark='Quarter Day';
+                                $total_quarter_day+=1;
+                               
+                            }
+                            if(($in_time>2 && $in_time<=4) || ($out_time>2 && $out_time<=4))
+                            {
+                                
+                              $remark='Half day';
+                              $total_half_day+=1;
+                            }
+                            
+                            if(($in_time>4) && ($out_time>4))
+                            {
+                                
+                                $remark='Leave';
+                                $total_leave+=1;
+                            }
+                                if(($in_time>4) && ($time>=4))
+                                {
+                                    
+                                    $remark='half day';
+                                    $total_half_day+1;
+                                }
+                            }
+                            
+                               
+                            } 
+                           
+                        }
+                    }
+                    
+                } else {
+
+                    foreach($leaveTypes as $leavetyp)
+                    {
+                     $total_leave_days=0;
+                      $count_type=DB::table('staff_leave')->where('staff_id',$stf->sid)->where('leave_type',$leavetyp->id)->count();
+                      if($count_type>0)
+                      {
+                         $staff_leave[$leavetyp->type.' available']=DB::table('staff_leave')->where('staff_id',$stf->sid)->where('leave_type',$leavetyp->id)->value('total_leaves');
+                      }
+                      else
+                      {
+                         $staff_leave[$leavetyp->type.' available']=0;
+                      }
+                      $leaveid=$leavetyp->id;
+                      $leave_type=$leavetyp->type;
+                      
+                       $leave=DB::table('leave_table')
+                      ->where(function ($query) use ($staff_id,$leaveid,$month,$year) {
+                        $query->where('staff_id',$staff_id)
+                             ->where('leave_id',$leaveid)
+                             ->where('status','Approved')
+                             ->whereMonth('start_date',$month)
+                             ->whereYear('start_date',$year);
+                     })->orWhere(function ($query) use ($staff_id,$leaveid,$month,$year) {
+                         $query->where('staff_id',$staff_id)
+                         ->where('leave_id',$leaveid)
+                         ->where('status','Approved')
+                         ->whereMonth('end_date',$month)
+                         ->whereYear('end_date',$year);
+                     })->get(['start_date','end_date']);
+                     if(sizeof($leave)>0)
+                     {
+                         foreach($leave as $lea)
+                         {
+                            $total_leave_days+= $this->getAllDates($lea->start_date, $lea->end_date,$month,$year);
+                            $leave_array[$leave_type.' taken']=$total_leave_days;
+           
+                              
+                         }
+                     }
+                     else
+                     {
+                         $leave_array[$leave_type.' taken']=0;
+                     }
+                       
+                  }
+                   $stf->total_leave=$total_leave;
+                   $stf->half_day=$total_half_day;
+                   $stf->quarter_day=$total_quarter_day;
+                   $stf->not_mark=$total_not_mark;
+                   $stf->late_mark=$total_late_mark;
+                   $stf->leave_available=$staff_leave;
+                   $stf->leave_taken=  $leave_array;
+                    
+                }
+            }
+        }
+
+            return view('pages.leave.statistics_leave', compact('staff', 'leaveTypes'));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => $e->getMessage()));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => $e->getMessage()));
+        }
+    }
+    public function show_staffwise_statistics(Request $request)
+    {
+        try {
+            $total_earned_leaves = $applied_earned_leaves = $total_unpaid_leaves = $applied_unpaid_leaves = $total_sick_leaves = $applied_sick_leaves = $total_weekoff_leaves = $applied_weekoff_leaves = 0;
+
+            $financialYearStart = date('Y-m-d', strtotime($request->financialYearStart));
+            $financialYearEnd = date('Y-m-d', strtotime($request->financialYearEnd));
+            $total_earned_leaves = DB::table('staff_leave')->where('staff_id', $request->staff_id)->where('leave_type', 1)->sum('total_leaves');
+
+            $applied_earned_leaves = DB::table('leave_table')
+                ->where('staff_id', $request->staff_id)
+                ->where('leave_id', 1)
+                ->where('status', 'Approved')
+                ->whereBetween('start_date', [$financialYearStart, $financialYearEnd])
+                ->whereBetween('end_date', [$financialYearStart, $financialYearEnd])
+                ->count();
+
+            $total_unpaid_leaves = DB::table('staff_leave')->where('staff_id', $request->staff_id)->where('leave_type', 2)->sum('total_leaves');
+
+            $applied_unpaid_leaves = DB::table('leave_table')
+                ->where('staff_id', $request->staff_id)
+                ->where('leave_id', 2)
+                ->where('status', 'Approved')
+                ->whereBetween('start_date', [$financialYearStart, $financialYearEnd])
+                ->whereBetween('end_date', [$financialYearStart, $financialYearEnd])
+                ->count();
+
+            $total_sick_leaves = DB::table('staff_leave')->where('staff_id', $request->staff_id)->where('leave_type', 4)->sum('total_leaves');
+
+            $applied_sick_leaves = DB::table('leave_table')
+                ->where('staff_id', $request->staff_id)
+                ->where('leave_id', 4)
+                ->where('status', 'Approved')
+                ->whereBetween('start_date', [$financialYearStart, $financialYearEnd])
+                ->whereBetween('end_date', [$financialYearStart, $financialYearEnd])
+                ->count();
+            $total_weekly_off = DB::table('staff_leave')->where('staff_id', $request->staff_id)->where('leave_type', 7)->sum('total_leaves');
+
+            $applied_weekly_off = DB::table('leave_table')
+                ->where('staff_id', $request->staff_id)
+                ->where('leave_id', 7)
+                ->where('status', 'Approved')
+                ->whereBetween('start_date', [$financialYearStart, $financialYearEnd])
+                ->whereBetween('end_date', [$financialYearStart, $financialYearEnd])
+                ->count();
+
+            return response()->json(['status' => 'success', 'total_earned_leaves' => $total_earned_leaves, 'applied_earned_leaves' => $applied_earned_leaves, 'total_unpaid_leaves' => $total_unpaid_leaves, 'applied_unpaid_leaves' => $applied_unpaid_leaves, 'total_sick_leaves' => $total_sick_leaves, 'applied_sick_leaves' => $applied_sick_leaves, 'total_weekly_off' => $total_weekly_off, 'applied_weekly_off' => $applied_weekly_off]);
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Something went wrong,please contact to support team!'));
+        }
+    }
+}

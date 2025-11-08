@@ -1,0 +1,73 @@
+{
+  "menu": [
+    {
+      "url": "/",
+      "name": "Dashboard",
+      "slug": "dashboard/analytics",
+      "id":"#ico",
+      "icon": "desktop",
+      "dropdown": "1"
+    },
+    {
+      "url": "leads",
+      "name": "Clients/Leads",
+      "slug": "apps",
+      "icon": "users",
+      "dropdown": "1"
+
+    },
+    {
+      "url": "appointment-list",
+      "name": "Appointments",
+      "slug": "ui",
+      "icon": "alarm",
+      "dropdown": "1"
+  
+    },
+    {
+      "url": "follow-up-list",
+      "name": "Follow-up",
+      "slug": "ui",
+      "icon": "alarm",
+      "dropdown": "1"
+  
+    },
+    {
+      "url": "expense_list",
+      "name": "Expenses",
+      "icon": "credit-card-in",
+      "slug": "others",
+      "dropdown": "1"
+    },
+    
+    {
+      "url": "report",
+      "name": "Report",
+      "icon": "print-doc",
+      "slug": "report",
+      "dropdown": "1"
+    },
+    {
+      "url": "upload_document",
+      "name": "Knowledge Base",
+      "icon": "bulb",
+      "slug": "others",
+      "dropdown": "1"
+    },
+    {
+      "url": "staff_add",
+      "name": "Settings",
+      "icon": "gear",
+      "slug": "settings",
+      "dropdown": "1"
+    },
+   
+    {
+      "url": "task",
+      "name": "Task",
+      "icon": "thumbnails-small",
+      "slug": "task",
+      "dropdown": "1"
+    }
+  ]
+}

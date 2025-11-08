@@ -1,0 +1,197 @@
+<ul class="nav nav-tabs" role="tablist" style=" margin-bottom: -20px !important;">
+  <li class="nav-item">
+    <a class="nav-link active" data-toggle="tab" href="#tabs-1" role="tab">Table View</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link" data-toggle="tab" href="#tabs-2" role="tab">Analytics View</a>
+  </li>
+</ul>
+
+<div class="tab-content">
+  <div class="tab-pane active" id="tabs-1" role="tabpanel">
+    <div class="todo-task-list list-group ps" style="height: 100%; !important;">
+
+
+      <div class="task_list">
+
+        <div style="gap: 10px;display: inline-flex;margin: 34px 10px 10px 8px;">
+
+          <div class="task_div">
+            <div class="todoHead bg_todo">
+              <h4>New - {{sizeof($task_New)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+
+              @foreach($task_New as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+
+            </div>
+          </div>
+
+          <div class="task_div">
+            <div class="todoHead bg_in_process">
+              <h4>In Progress -{{sizeof($task_in_progress)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+              @foreach($task_in_progress as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+
+            </div>
+          </div>
+
+          <div class="task_div">
+            <div class="todoHead bg_testing">
+              <h4>On Hold- Documents - {{sizeof($task_Onhold_Document)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+
+              @foreach($task_Onhold_Document as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+
+            </div>
+          </div>
+
+
+          <div class="task_div">
+            <div class="todoHead bg_On_Hold_Payment">
+              <h4>On Hold- Payment - {{sizeof($task_Onhold_payment)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+              @foreach($task_Onhold_payment as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+            </div>
+          </div>
+
+          <div class="task_div">
+            <div class="todoHead bg_completed">
+              <h4>Completed - {{sizeof($task_Completed)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+              @foreach($task_Completed as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+            </div>
+          </div>
+
+          <div class="task_div">
+            <div class="todoHead bg_senior_review">
+              <h4>Senior Review - {{sizeof($task_Senior_Review)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+              @foreach($task_Senior_Review as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+            </div>
+          </div>
+
+          <div class="task_div">
+            <div class="todoHead bg_cancelled">
+              <h4>Cancelled - {{sizeof($task_Cancelled)}}</h4>
+              <i class="bx bx-plus-circle"></i>
+            </div>
+            <div class="todoMain">
+              @foreach($task_Cancelled as $row)
+              <div class="todoCBox">
+                <div class="todoCBoxHead">
+                  <h5 class="todo_title">{{$row->title}}</h5>
+                  <i class="bx bx-dots-horizontal-rounded todo_title"></i>
+                </div>
+                <h6>{!! substr(strip_tags($row->description),0,50) !!}</h6>
+                <p>{{date('M d,Y',strtotime($row->created_at))}}</p>
+              </div>
+              @endforeach
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="tab-pane active" id="tabs-2" role="tabpanel">
+
+    <div class="card" style=" margin-top: 25px;margin-bottom: 30px;">
+      <div class="card-body pl-1">
+        <div class="row">
+          <div class="col-11">
+            <div class="height-300" id="doughnutChartContent" style="margin-bottom: 30px;">
+              <canvas id="simple-doughnut-chart"></canvas>
+            </div>
+          </div>
+          <div class="col-1">
+            <div class="text-right">
+              <select name="doughnutChartMonth" id="doughnutChartMonth" class="form-control monthDropdown" onchange=doughnutChart(this.value)>
+                @for($i=1;$i<=12;$i++) @if(date('m')==date('m', mktime(0, 0, 0, $i, 10))) <option value="{{date('m', mktime(0, 0, 0, $i, 10))}}" selected>{{date("F", mktime(0, 0, 0, $i, 10))}}</option>
+                  @else
+                  <option value="{{date('m', mktime(0, 0, 0, $i, 10))}}">{{date("F", mktime(0, 0, 0, $i, 10))}}</option>
+                  @endif
+                  @endfor
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style=" margin-top: 25px;">
+      <div class="card-header">
+        <h5 class=" title" style="margin-left: 20px;margin-top: 10px;margin-bottom: 10px">Milestone</h5>
+      </div>
+      <div class="card-body pl-0">
+        <div class="row milestoneContent">
+
+        </div>
+      </div>
+    </div>
+  </div>

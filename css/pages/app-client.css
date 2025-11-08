@@ -1,0 +1,276 @@
+@charset "UTF-8";
+/* client Application css */
+/*-------------------------*/
+.client-view-wrapper hr {
+  border-style: dashed;
+}
+/*  changes vandana                      */
+.label_title
+{
+  font-weight: 500;
+}
+
+/*-------------------------*/
+
+.client-view-wrapper .client-info .client-from,
+.client-view-wrapper .client-info .client-to {
+  margin-bottom: 0.8rem;
+}
+
+.client-view-wrapper .client-product-details .table th {
+  font-weight: 500;
+}
+
+.client-view-wrapper .client-product-details .table th,
+.client-view-wrapper .client-product-details .table td {
+  padding: 0.75rem 2rem;
+}
+
+.client-view-wrapper .client-subtotal .client-calc {
+  margin: 0.2rem 0;
+}
+
+.client-view-wrapper .client-subtotal .client-calc .client-title {
+  width: 171px;
+}
+
+.client-view-wrapper .client-subtotal .client-calc .client-value {
+  color: #304156;
+  margin-bottom: 0;
+}
+
+.client-view-wrapper .client-action-wrapper {
+  background-color: #fafbfb;
+}
+
+.client-view-wrapper .client-action-wrapper .client-action-btn {
+  margin-bottom: 1.2rem;
+}
+
+.client-view-wrapper .client-action-wrapper .client-action-btn .client-send-btn {
+  box-shadow: 0 2px 4px 0 rgba(90, 141, 238, 0.6);
+}
+
+.client-list-wrapper .dataTables_wrapper .top {
+  border: 1px solid #DFE3E7;
+  background-color: #FFFFFF;
+  border-top-left-radius: 0.267rem;
+  border-top-right-radius: 0.267rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter {
+  padding: 0 15px;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label {
+  width: 100%;
+  margin-bottom: 0;
+  position: relative;
+  font-family: boxicons !important;
+  line-height: 1;
+  font-size: 1rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label::after {
+  position: absolute;
+  content: "";
+  left: 20px;
+  top: 12px;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label input {
+  width: 99%;
+  height: 38px;
+  font-family: "IBM Plex Sans", Helvetica, Arial, serif;
+  padding-left: 2rem;
+  font-size: 1rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label input::-moz-placeholder {
+  font-family: "IBM Plex Sans", Helvetica, Arial, serif;
+  color: #828D99;
+  font-size: 1rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label input:-ms-input-placeholder {
+  font-family: "IBM Plex Sans", Helvetica, Arial, serif;
+  color: #828D99;
+  font-size: 1rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-filters .dataTables_filter label input::placeholder {
+  font-family: "IBM Plex Sans", Helvetica, Arial, serif;
+  color: #828D99;
+  font-size: 1rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .top .action-btns button {
+  padding: 0.367rem 1.5rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table {
+  background-color: #FFFFFF;
+  border: 1px solid #DFE3E7;
+  border-top: none;
+  border-bottom-left-radius: 0.267rem;
+  border-bottom-right-radius: 0.267rem;
+  border-collapse: separate !important;
+  border-spacing: 0;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table thead th {
+  font-weight: normal;
+  font-size: 0.99rem;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table thead th:last-child::after, .client-list-wrapper .dataTables_wrapper .client-data-table thead th:last-child::before {
+  display: none;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tr:hover {
+  box-shadow: 0 0 6px 0 rgba(0, 0, 0, 0.12);
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tr th:nth-child(2),
+.client-list-wrapper .dataTables_wrapper .client-data-table tr td:nth-child(2) {
+  padding-left: 10px;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tr .client-action a {
+  color: #b3c0ce;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tr td {
+  white-space: nowrap;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell {
+  width: 1px !important;
+  padding: 0 20px 3px 19px;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell::after, .client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell::before {
+  display: none;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell input {
+  width: 0;
+  position: relative;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell input::before {
+  content: "";
+  height: 20px;
+  width: 20px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 4px;
+  background-color: #FFFFFF;
+  border: 1px solid #DFE3E7;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell input::after {
+  content: "";
+  height: 20px;
+  width: 20px;
+  border: 1px solid #DFE3E7;
+  position: absolute;
+  border-radius: 4px;
+  top: 0;
+  left: 0;
+  transition: 100ms ease-in-out;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell input:checked::after {
+  border-top-style: none;
+  border-right-style: none;
+  transform: rotate(-45deg);
+  height: 0.4rem;
+  width: 0.8rem;
+  border-color: #5A8DEE;
+  border-radius: 0;
+  border-width: 2px;
+  top: 6px;
+  left: 4px;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table .dt-checkboxes-cell input:checked::before {
+  box-shadow: 0 0 6px 0 rgba(22, 22, 22, 0.2);
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tbody .selected-row-bg {
+  background-color: #e7edf3;
+}
+
+.client-list-wrapper .dataTables_wrapper .client-data-table tbody .bullet-sm {
+  margin-right: 0.2rem;
+}
+
+.client-list-wrapper table.dataTable.dtr-column > tbody > tr > td.control:before,
+.client-list-wrapper table.dataTable.dtr-column > tbody > tr > th.control:before {
+  line-height: 18px;
+}
+
+.client-edit-wrapper hr {
+  border-style: dashed;
+}
+
+.client-edit-wrapper .client-info .client-to {
+  margin-bottom: 0.8rem;
+}
+
+.client-edit-wrapper .client-date-picker .pickadate {
+  max-width: 130px;
+}
+
+.client-edit-wrapper .client-item-title {
+  color: #475F7B;
+  font-weight: 500;
+}
+
+.client-edit-wrapper .client-icon .dropdown .dropdown-toggle::after {
+  display: none;
+}
+
+.client-edit-wrapper .client-icon .dropdown .dropdown-menu {
+  width: 20rem;
+}
+
+.client-edit-wrapper .client-icon .dropdown .dropdown-menu::before {
+  display: none;
+}
+
+
+
+.client-edit-wrapper .client-action-wrapper .client-action-btn .client-send-btn {
+  box-shadow: 0 2px 4px 0 rgba(90, 141, 238, 0.6);
+}
+
+.client-edit-wrapper .client-terms .client-terms-title {
+  font-family: "Rubik", Helvetica, Arial, serif;
+  color: #475F7B;
+}
+
+
+@media screen and (max-width: 596px) {
+  .action-btns {
+    margin-bottom: 1rem;
+    padding-left: 23px;
+  }
+}
+@media screen and (max-width: 767px) {
+  .client-payment {
+    border: 1px solid #DFE3E7;
+    border-radius: 0.267rem;
+    padding: 1rem;
+  }
+}
+
+@page {
+  size: auto;
+  /* auto is the initial value */
+  margin: 0;
+  padding: 0;
+  /* this affects the margin in the printer settings */
+}

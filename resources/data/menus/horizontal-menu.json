@@ -1,0 +1,105 @@
+{
+  "menu": [
+    {
+      "url": "/",
+      "name": "Dashboard",
+      "slug": "dashboard/analytics",
+      "id":"#ico",
+      "icon": "desktop",
+      "dropdown": "1"
+    },
+    {
+      "url": "leads",
+      "name": "Clients/Leads",
+      "slug": "apps",
+      "icon": "users",
+      "dropdown": "1"
+
+    },
+    {
+      "url": "appointment-list",
+      "name": "Appointments",
+      "slug": "ui",
+      "icon": "alarm",
+      "dropdown": "1"
+  
+    },
+    {
+      "url": "follow-up-list",
+      "name": "Follow-up",
+      "slug": "ui",
+      "icon": "alarm",
+      "dropdown": "1"
+  
+    },
+   
+    {
+      "url": "#",
+      "name": "Accounts",
+      "slug": "forms-tables",
+      "id":"#ico",
+      "icon": "coins",
+      "dropdown": "1",
+      "submenu": [
+        {
+          "url": "invoice_list",
+          "name": "Invoices",
+          "icon": "notebook",
+          "slug": "pages"
+        },
+        {
+          "url": "payment_list",
+          "name": "Payments",
+          "icon": "coins",
+          "slug": "charts-maps"
+        },
+        {
+          "url": "quotation_list",
+          "name": "Quotations",
+          "slug": "forms-tables",
+          "dropdown": "1",
+          "icon": "file-export"
+    
+          
+        },
+        {
+          "url": "expense_list",
+          "name": "Expenses",
+          "icon": "credit-card-in",
+          "slug": "others",
+          "dropdown": "1"
+        }
+      ]
+    },
+ 
+    {
+      "url": "report",
+      "name": "Report",
+      "icon": "print-doc",
+      "slug": "report",
+      "dropdown": "1"
+    },
+    {
+      "url": "upload_document",
+      "name": "Knowledge Base",
+      "icon": "bulb",
+      "slug": "others",
+      "dropdown": "1"
+    },
+    {
+      "url": "staff_add",
+      "name": "Settings",
+      "icon": "gear",
+      "slug": "settings",
+      "dropdown": "1"
+    },
+   
+    {
+      "url": "task",
+      "name": "Task",
+      "icon": "thumbnails-small",
+      "slug": "task",
+      "dropdown": "1"
+    }
+  ]
+}

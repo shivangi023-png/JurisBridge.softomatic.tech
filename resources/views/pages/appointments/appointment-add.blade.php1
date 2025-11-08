@@ -1,0 +1,346 @@
+@extends('layouts.contentLayoutMaster')
+{{-- page title --}}
+@section('title','New Appointment')
+{{-- vendor styles --}}
+@section('vendor-styles')
+<link rel="stylesheet" type="text/css" href="{{asset('vendors/css/pickers/pickadate/pickadate.css')}}">
+<link rel="stylesheet" type="text/css" href="{{asset('vendors/css/forms/select/select2.min.css')}}">
+<link rel="stylesheet" type="text/css" href="{{asset('vendors/css/extensions/sweetalert2.min.css')}}">
+
+@endsection
+{{-- page styles --}}
+@section('page-styles')
+<link rel="stylesheet" type="text/css" href="{{asset('css/pages/app-quotation.css')}}">
+<link rel="stylesheet" type="text/css" href="{{asset('css/wickedpicker/dist/wickedpicker.min.css')}}">
+
+<style>
+    .valid_err {
+        color: red;
+        font-size: 12px;
+    }
+</style>
+@endsection
+
+@section('content')
+<!-- app invoice View Page -->
+<section class="quotation-edit-wrapper">
+    <div class="row">
+        <!-- invoice view page -->
+        <div class="col-xl-9 col-md-8 col-12">
+            <div class="card">
+                <div class="card-body pb-0 mx-25">
+                    <div id="alert"></div>
+                    <!-- header section -->
+                    <form method="POST" action='' id="form">
+                        {{ csrf_field() }}
+                        <div class="row mx-0 mt-2">
+                            <div class="col-xl-4 col-md-12 d-flex align-items-center pl-0">
+                                <h5 class="invoice-number mb-0 mr-75">New Appointment</h6>
+                            </div>
+                            <div class="col-xl-8 col-md-12 px-0 pt-xl-0 pt-1">
+                                <div class="invoice-date-picker d-flex align-items-center justify-content-xl-end flex-wrap">
+                                    <div class="d-flex align-items-center">
+                                        <span class="mr-75 label_title">Date: </span>
+
+                                        <fieldset class="d-flex ">
+                                            <input type="text" class="form-control pickadate mr-2 meeting_date" placeholder="Select Date">
+                                        </fieldset>
+                                        <span class="valid_err meeting_date_err"></span>
+
+                                    </div>
+
+                                    <div class="d-flex align-items-center">
+                                        <span class="mr-75 label_title">Time: </span>
+
+                                        <fieldset class="d-flex">
+                                            <input type="text" class="form-control timepicker time" placeholder="Select Date">
+                                        </fieldset>
+                                        <span class="valid_err time_err"></span>
+
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr>
+                        <div class="row pt-50">
+                            <div class="col-6 col-md-6">
+                                <fieldset class="form-group">
+                                    <div class="input-group">
+
+                                        <select class="form-control client" id="client" name="client">
+                                            <option value="">Client name</option>
+                                            @foreach($clients as $client)
+                                            <option value="{{$client->id}}" {{$client->id == $client_id  ? 'selected' : ''}}>{{$client->case_no}} ({{$client->client_name}})</option>
+                                            @endforeach
+
+                                        </select>
+                                        <span class="client_err valid_err"></span>
+
+                                    </div>
+                                </fieldset>
+                            </div>
+                            <div class="col-6 col-md-6">
+                                <fieldset class="form-group">
+                                    <div class="input-group">
+                                        <div class="input-group-prepend">
+                                            <span class="input-group-text">Meeting Type</span>
+                                        </div>
+                                        <select class="form-control meeting_type" id="meeting_type" name="meeting_type">
+                                            <option value="">Select</option>
+                                            @foreach($appointment_places as $ap)
+                                            <option value="{{$ap->id}}">{{$ap->name}}</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                    <span class="meeting_type_err valid_err"></span>
+                                </fieldset>
+                            </div>
+
+                            <div class="col-12 col-md-12">
+                                <input type="text" name="online_meeting" id="online_meeting" class="form-control" placeholder="Online Meeting">
+                                <span class="online_meeting_err valid_err"></span>
+                            </div>
+                        </div>
+                </div>
+
+                <div class="row  pt-50 mx-1">
+                    <div class="col-md-6 col-12">
+                        <fieldset class="form-group">
+                            <div class="input-group">
+                                <div class="input-group-prepend">
+                                    <span class="input-group-text">Meeting with</span>
+                                </div>
+                                <select class="form-control meeting_with" id="meeting_with" name="meeting_with">
+                                    <option value="">Select</option>
+                                    @foreach($staff as $stf)
+                                    <option value="{{$stf->sid}}">{{$stf->name}}</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            <span class="meeting_with_err valid_err"></span>
+                        </fieldset>
+                    </div>
+
+                    <div class="col-md-6 col-12">
+                        <fieldset class="form-group">
+                            <div class="input-group">
+                                <div class="input-group-prepend">
+                                    <span class="input-group-text">Schedule By</span>
+                                </div>
+                                <select class="form-control schedule_by" id="schedule_by" name="schedule_by">
+
+                                    @foreach($staff as $stf)
+                                    @if(session('role_id')!=1 && (session('user_id')==$stf->user_id))
+                                    <option value="{{$stf->sid}}" selected>{{$stf->name}}</option>
+
+                                    @endif
+                                    @endforeach
+                                    @if(session('role_id')==1)
+                                    <option value="">Select</option>
+                                    @foreach($staff as $stf)
+                                    <option value="{{$stf->sid}}">{{$stf->name}}</option>
+                                    @endforeach
+                                    @endif
+                                </select>
+                            </div>
+                            <span class="schedule_by_err valid_err"></span>
+                        </fieldset>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-auto mr-auto">
+                        <a href="{{url()->previous()}}" class="btn btn-icon btn-warning px-5 mr1 mb-1">Go Back</a>
+                    </div>
+                    <div class="col-auto">
+                        <button type="button" name="submit" class="btn btn-primary px-5 mr-3 submit" id="submit">Submit</button>
+                        <button type="reset" class="btn btn-light-secondary px-5">Reset</button>
+                    </div>
+                </div>
+
+
+                </form>
+
+                <br><br>
+            </div>
+        </div>
+    </div>
+
+    <!-- invoice action  -->
+
+    </div>
+    </div>
+</section>
+@endsection
+
+{{-- vendor scripts --}}
+@section('vendor-scripts')
+<script src="{{asset('vendors/js/pickers/pickadate/picker.js')}}"></script>
+<script src="{{asset('vendors/js/pickers/pickadate/picker.date.js')}}"></script>
+<script src="{{asset('vendors/js/forms/select/select2.full.min.js')}}"></script>
+<script src="{{asset('vendors/js/extensions/sweetalert2.all.min.js')}}"></script>
+@endsection
+{{-- page scripts --}}
+
+@section('page-scripts')
+<script src="{{asset('js/scripts/pages/app-quotation.js')}}"></script>
+<script src="{{asset('js/scripts/wickedpicker/dist/wickedpicker.min.js')}}"></script>
+<script type="text/javascript">
+    $(document).ready(function() {
+        $('#online_meeting').hide();
+        $('.timepicker').wickedpicker();
+        console.log("inside ajax")
+        $.ajaxSetup({
+            headers: {
+                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+            }
+        });
+
+        // $("#meeting_type,#meeting_with,#schedule_by").select2({
+        //     dropdownAutoWidth: true,
+        //     placeholder: "Select",
+        // });
+
+        $(document).on('click', '#submit', function() {
+            $.ajaxSetup({
+                headers: {
+                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                }
+            });
+            $('.valid_err').html('');
+            var client = $('.client').val();
+            var meeting_with = $('.meeting_with').val();
+            var schedule_by = $('.schedule_by').val();
+            var meeting_date = $('.meeting_date').val();
+            var time = $('.time').val();
+            // var meeting_place = $('.meeting_place').val();
+            // var selected_company=$('.selected-company-id').val(); 
+            var online_meeting = $('#online_meeting').val();
+            var meeting_type = $('#meeting_type').val();
+            var meeting_notes = $('#full-body-container .body_editor .ql-editor').text();
+
+
+            var arr = [];
+
+            if (client == '') {
+                arr.push('client_err');
+                arr.push('Please select client');
+            }
+
+            if (meeting_with == '') {
+                arr.push('meeting_with_err');
+                arr.push('Please select meeting with');
+            }
+            if (schedule_by == '') {
+                arr.push('schedule_by_err');
+                arr.push('Please select schedule by');
+            }
+
+            if (meeting_date == '') {
+                arr.push('meeting_date_err');
+                arr.push('Meeting date required');
+            }
+            if (time == '') {
+                arr.push('time_err');
+                arr.push('time required');
+            }
+            if (meeting_type == '') {
+                arr.push('meeting_type_err');
+                arr.push('Please Select Meeting Type');
+            }
+
+            if (meeting_type == 2 && online_meeting == '') {
+                arr.push('online_meeting_err');
+                arr.push('Please enter online meeting');
+            }
+
+            if (arr != '') {
+                for (var i = 0; i < arr.length; i++) {
+                    var j = i + 1;
+
+
+                    $('.' + arr[i]).html(arr[j]).css('color', 'red');
+
+
+
+                    i = j;
+                }
+            } else {
+
+                $.ajax({
+                    type: 'post',
+                    url: 'submit_appointment',
+
+                    data: {
+                        client: client,
+                        meeting_with: meeting_with,
+                        schedule_by: schedule_by,
+                        meeting_date: meeting_date,
+                        time: time,
+                        // meeting_place: meeting_place,
+                        // selected_company:selected_company,
+                        meeting_type: meeting_type,
+                        online_meeting: online_meeting,
+                        meeting_notes: meeting_notes
+                    },
+
+                    success: function(data) {
+                        console.log(data);
+                        $("#alert").animate({
+                                scrollTop: $(window).scrollTop(0)
+                            },
+                            "slow"
+                        );
+                        var res = JSON.parse(data);
+                        if (res.status == 'success') {
+                            console.log('success');
+                            $('#alert').html(
+                                '<div class="alert bg-rgba-success alert-dismissible mb-2" role="alert"><button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button><div class="d-flex align-items-center"><i class="bx bx-like"></i><span>' +
+                                res.msg + '</span></div></div>');
+                            $("#form").trigger('reset');
+
+
+                        } else {
+                            $('#alert').html(
+                                '<div class="alert bg-rgba-danger alert-dismissible mb-2" role="alert"><button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button><div class="d-flex align-items-center"><i class="bx bx-x"></i><span>' +
+                                res.msg + '</span></div></div>');
+
+                        }
+
+
+
+                    },
+                    error: function(data) {
+                        console.log(data);
+                        $("#alert").animate({
+                                scrollTop: $(window).scrollTop(0)
+                            },
+                            "slow"
+                        );
+                        $('#alert').html(
+                            '<div class="alert bg-rgba-danger alert-dismissible mb-2" role="alert"><button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">×</span></button><div class="d-flex align-items-center"><i class="bx bx-x"></i><span>Something wend wrong!</span></div></div>'
+                        );
+                        $(".alert").fadeTo(2000, 500).slideUp(500, function() {
+                            $(".alert").slideUp(500);
+                        });
+                    }
+                });
+            }
+
+        });
+
+    });
+
+    $(document).on('change', '#meeting_type', function() {
+        var meeting_type_id = $(this).val();
+        $('.online_meeting_err').html('');
+        if (meeting_type_id == 2) {
+            $('#online_meeting').show();
+        } else {
+            $('#online_meeting').hide();
+            $('#online_meeting').val('');
+        }
+    });
+</script>
+@endsection

@@ -1,0 +1,6831 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Storage;
+use App\Traits\NotificationTraits;
+use Google_Client;
+
+date_default_timezone_set("Asia/Kolkata");
+
+use App\Traits\StaffTraits;
+use App\Traits\TaskTraits;
+
+class TaskManagementController extends Controller
+{
+    use StaffTraits;
+    use TaskTraits;
+    use NotificationTraits;
+    public function index(Request $request)
+    {
+         if (session('username') == "") {
+            return redirect('/')->with('alert-danger', "Please login First");
+        }
+
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+        return view(
+            "pages.task.task",
+            compact(
+                "services_list",
+                "staff_list",
+                "project_status_master",
+                "task_status_master",
+                "task_priority",
+                "task_type",
+                "project_list",
+                "office_list"
+            )
+        );
+    }
+
+    public function task_analytics(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        return view(
+            "pages.task.task_analytics_view",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+    public function staff_wise_task(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        return view(
+            "pages.task.staff_wise_task",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+   public function get_task_chart(Request $request)
+    {
+        log::info('inside get_task_chart function');
+        $month = $request->month;
+        $year = date('Y');
+        $start_date = date('Y-m-d', strtotime($year . '-' . $month . '-01'));
+        $end_date = date("Y-m-t", strtotime($start_date));
+        //task wise 
+        $label1 = $value1 = $label_id1 = array();
+        $data1 = DB::table('task')->join('task_status_master', 'task_status_master.id', 'task.status')->select(DB::raw("count(task.status) as status_sum"), 'task_status_master.status as status_name', 'task_status_master.id');
+
+        if ($start_date != '') {
+            $data1 = $data1->where('task.start_date', '>=', $start_date);
+        }
+        if ($end_date != '') {
+            $data1 = $data1->where('task.start_date', '<=', $end_date);
+        }
+        if (session('role_id') != 1) {
+            $data1 = $data1->whereJsonContains('task.assignee', (string)session('staff_id'));
+        }
+        $data1 = $data1->groupBy('task.status')->get();
+
+        foreach ($data1 as $row) {
+            $label_id1[] =  $row->id;
+            $label1[] =  $row->status_name;
+            $value1[] = $row->status_sum;
+        }
+        return response()->json(array('label1' => $label1, 'label_id1' => $label_id1, 'data1' => $value1));
+    }
+    public function task_status_details(Request $request)
+    {   
+        $month= $request->month;
+        log::info('inside pie chart status click task_status_details function');
+        $task_status_id = $request->task_status_id;
+        $status_name = DB::table('task_status_master')->where('id', $task_status_id)->value('status');
+        $office_list = DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get(["id", "status"]);
+        $task_status_master = DB::table("task_status_master")->get(["id", "status"]);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        $project_list = DB::table('projects')->where('active', 'yes')->get();
+        return view("pages.task.task_status_detail", compact("staff_list", "project_list", "project_status_master", "task_status_master", "task_priority", "task_type", 'task_status_id', 'office_list','month'));
+    }
+    public function get_task_status_list(Request $request)
+    {
+        try {
+            $month=$request->month;
+            Log::info("inside task_status_list");
+            $task_status_id = $request->task_status_id;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            if (session('role_id') != 1) {
+                $staff_id = (string)session('staff_id');
+            } else {
+                $staff_id = '';
+            }
+            $year=date('Y');
+           
+             $start_date = date('Y-m-d', strtotime($year . '-' . $month . '-01'));
+            $end_date = date("Y-m-t", strtotime($start_date));
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                )->where(function ($query) use ($staff_id, $task_status_id,$start_date,$end_date) {
+                    if ($staff_id != '') {
+                        $query->whereJsonContains('task.assignee', $staff_id);
+                    }
+                    if ($task_status_id != '') {
+                        $query->where('task.status', $task_status_id);
+                    }
+                    if ($start_date != '') {
+                        $query->where('task.start_date', '>=', $start_date);
+                    }
+                    if ($end_date != '') {
+                        $query->where('task.start_date', '<=', $end_date);
+                    }
+                })->get($fields);
+
+            foreach ($task_list as $row) {
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                } else {
+                    $row->assignee_name = '';
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if ($row->dept_geolocation == '["\"\"","\"\""]') {
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if ($row->dept_geolocation != null) {
+
+                    $lat_long = json_decode($row->dept_geolocation, true);
+                    $row->lat_long = $lat_long[1] . "," . $lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if ($row->working_hr != null) {
+                    $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr . " Hr";
+            }
+            return view(
+                "pages.task.task_status_list",
+                compact('task_list')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+
+
+    public function get_type_chart(Request $request)
+    {
+        log::info('inside get_type_chart function');
+        $month = $request->month;
+        $year = date('Y');
+        $start_date = date('Y-m-d', strtotime($year . '-' . $month . '-01'));
+        $end_date = date("Y-m-t", strtotime($start_date));
+        log::info($start_date);
+        log::info($end_date);
+        $label1 = $value1 = array();
+        $task_type = DB::table('task_type')->where('status', 1)->get();
+        foreach ($task_type as $row) {
+            $label1[] = $row->type;
+            $data =   DB::table('task')
+                ->join('task_type', 'task_type.id', 'task.type')
+                ->select('task_type.type as type_name')
+                ->distinct()
+                ->where('task.active', 'yes')
+                ->where('task_type.id', $row->id);
+            $data = $data->where(function ($query) use ($start_date, $end_date) {
+                if ($start_date != '') {
+                    $query->where('task.start_date', '>=', $start_date);
+                }
+                if ($end_date != '') {
+                    $query->where('task.start_date', '<=', $end_date);
+                }
+            });
+            if (session('role_id') != 1) {
+                $data = $data->whereJsonContains('task.assignee', (string)session('staff_id'));
+            }
+            $count =  $data->count();
+            $value1[] = $count ?: 0;
+        }
+        return response()->json(array('label' => $label1, 'data' => $value1,'month'=>$month));
+    }
+    public function task_type_details(Request $request)
+    {
+        log::info('inside Barchart type click task_type_details');
+        $type_name = $request->type_name;
+        $month=$request->month;
+        $office_list = DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get(["id", "status"]);
+        $task_status_master = DB::table("task_status_master")->get(["id", "status"]);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        $project_list = DB::table('projects')->where('active', 'yes')->get();
+        return view("pages.task.task_type_detail", compact("staff_list", "project_list", "project_status_master", "task_status_master", "task_priority", "task_type", 'type_name', 'office_list','month'));
+    }
+
+    public function get_task_type_list(Request $request)
+    {
+        try {
+            Log::info("inside task_status_list");
+            $task_type = $request->task_type;
+            $month = $request->month;
+            $year = date('Y');
+            $start_date = date('Y-m-d', strtotime($year . '-' . $month . '-01'));
+            $end_date = date("Y-m-t", strtotime($start_date));
+            $task_type_id = DB::table('task_type')->where('type', $task_type)->value('id');
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            if (session('role_id') != 1) {
+                $staff_id = (string)session('staff_id');
+            } else {
+                $staff_id = '';
+            }
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                )->where(function ($query) use ($staff_id, $task_type_id,$start_date,$end_date) {
+                    if ($staff_id != '') {
+                        $query->whereJsonContains('task.assignee', $staff_id);
+                    }
+                    if ($task_type_id != '') {
+                        $query->where('task.type', $task_type_id);
+                    }
+                    if ($start_date != '') {
+                        $query->where('task.start_date', '>=', $start_date);
+                    }
+                    if ($end_date != '') {
+                        $query->where('task.start_date', '<=', $end_date);
+                    }
+                })->get($fields);
+
+            foreach ($task_list as $row) {
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    // $staff_name = DB::table('staff')->where('sid', $assignee)->pluck('name');
+                    $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                } else {
+                    $row->assignee_name = '';
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if ($row->dept_geolocation == '["\"\"","\"\""]') {
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if ($row->dept_geolocation != null) {
+                    // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                    // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation, true);
+                    $row->lat_long = $lat_long[1] . "," . $lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if ($row->working_hr != null) {
+                    $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr . " Hr";
+            }
+            return view(
+                "pages.task.task_type_list",
+                compact('task_list')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+      public function projects(Request $request)
+    {
+        // finalize_quotation case_no service
+        // project_name
+        $project_name = $request->project_name;
+        $staff_list = $this->get_staff_list();
+        $office_list = DB::table('dept_address')->get();
+        $clients_list = DB::table("clients")->get([
+            "id",
+            "client_name",
+            "case_no",
+        ]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+
+
+        //multiple assignee list 
+
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+
+        $main_template_list = DB::table("main_template")->where('status', 'active')->get();
+        $projects_list = DB::table('projects')
+            ->leftjoin("project_status_master", "project_status_master.id", "projects.status_id");
+        if (session('role_id') != 1) {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $projects_list = $projects_list->whereIn('projects.id', $project_ids);
+        }
+        $projects_list = $projects_list->where('projects.active', 'yes')->orderBy("projects.created_at", "desc");
+
+        $projects_list = $projects_list->get([
+            "projects.id", "projects.client_id", "projects.case_no", "projects.project_name", "projects.start_date", "projects.end_date", "projects.service_id", "projects.status_id", "project_status_master.status"
+        ]);
+        foreach ($projects_list as $row) {
+            $row->assignee_list = $assignee =  null;
+            $row->staff_id = null;
+            $staff_list = DB::table('staff')
+                ->leftjoin("projects_assignee", "projects_assignee.staff_id", "staff.sid")
+                ->where('projects_assignee.projects_id', $row->id)->get(['staff.sid', 'staff.name', 'staff.short_name']);
+            foreach ($staff_list as $row1) {
+                // $assignee .= $row1->name . ',';
+                $assignee .= $row1->short_name . ',';
+                $row->staff_id[] = $row1->sid;
+            }
+            $row->assignee_list = rtrim($assignee, ',');
+            if ($row->staff_id != null) {
+                $row->staff_id = json_encode($row->staff_id);
+            }
+        }
+        $project_list = $projects_list;
+        return view(
+            "pages.task.projects",
+            compact(
+                "services_list",
+                "staff_list",
+                "project_status_master",
+                "task_status_master",
+                "task_priority",
+                "task_type",
+                "main_template_list",
+                "project_list",
+                "office_list"
+            )
+        );
+    }
+
+
+    public function project_filter(Request $request)
+    {
+        $project_status = $request->project_status;
+        $project_start_date = $request->project_start_date;
+        $project_end_date = $request->project_end_date;
+
+        $projects_list = DB::table('projects')
+            ->leftjoin("project_status_master", "project_status_master.id", "projects.status_id");
+        if (session('role_id') != 1) {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $projects_list = $projects_list->whereIn('projects.id', $project_ids);
+        }
+        if ($project_status != NULL) {
+            $projects_list = $projects_list->where("projects.status_id", $project_status);
+        }
+        if ($project_start_date != NULL) {
+            $project_start_date = date('Y-m-d', strtotime(str_replace('/', '-', $project_start_date)));
+            log::info('project_start_date ' . $project_start_date);
+            $projects_list = $projects_list->where("projects.start_date", $project_start_date);
+        }
+        if ($project_end_date != NULL) {
+            $project_end_date = date('Y-m-d', strtotime(str_replace('/', '-', $project_end_date)));
+            $projects_list = $projects_list->where("projects.end_date", $project_end_date);
+        }
+        $projects_list = $projects_list->where('projects.active', 'yes')->orderBy("projects.created_at", "desc");
+
+        $projects_list = $projects_list->get([
+            "projects.id", "projects.client_id", "projects.case_no", "projects.project_name", "projects.start_date", "projects.end_date", "projects.service_id", "projects.status_id", "project_status_master.status"
+        ]);
+        foreach ($projects_list as $row) {
+            $row->assignee_list = $assignee =  null;
+            $row->staff_id = null;
+            $staff_list = DB::table('staff')
+                ->leftjoin("projects_assignee", "projects_assignee.staff_id", "staff.sid")
+                ->where('projects_assignee.projects_id', $row->id)->get(['staff.sid', 'staff.name', 'staff.short_name']);
+            foreach ($staff_list as $row1) {
+                // $assignee .= $row1->name . ',';
+                $assignee .= $row1->short_name . ',';
+                $row->staff_id[] = $row1->sid;
+            }
+            $row->assignee_list = rtrim($assignee, ',');
+            if ($row->staff_id != null) {
+                $row->staff_id = json_encode($row->staff_id);
+            }
+        }
+
+        return view("pages.task.projects_list", compact("projects_list"));
+    }
+
+    public function projects_table(Request $request)
+    {
+        $projects_list = DB::table("projects")
+            ->leftjoin(
+                "project_status_master",
+                "project_status_master.id",
+                "projects.status_id"
+            )
+            ->orderBy("projects.created_at", "desc")
+            ->get([
+                "projects.id",
+                "projects.client_id",
+                "projects.case_no",
+                "projects.project_name",
+                "projects.start_date",
+                "projects.end_date",
+                "projects.service_id",
+                "projects.status_id",
+                "project_status_master.status",
+            ]);
+        //multiple assignee list 
+        foreach ($projects_list as $row) {
+            $row->assignee_list = $assignee =  null;
+            $row->staff_id = null;
+            $staff_list = DB::table('staff')
+                ->leftjoin("projects_assignee", "projects_assignee.staff_id", "staff.sid")
+                ->where('projects_assignee.projects_id', $row->id)->get(['staff.sid', 'staff.name','staff.short_name']);
+            foreach ($staff_list as $row1) {
+                // $assignee .= $row1->name . ',';
+                $assignee .= $row1->short_name . ',';
+                $row->staff_id[] = $row1->sid;
+            }
+            $row->assignee_list = rtrim($assignee, ',');
+            if ($row->staff_id != null) {
+                $row->staff_id = json_encode($row->staff_id);
+            }
+        }
+        return view("pages.task.projects_list", compact("projects_list"));
+    }
+    public function projects_task(Request $request)
+    {
+        $project_id = $request->project_id;
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $clients_list = DB::table("clients")->get([
+            "id",
+            "client_name",
+            "case_no",
+        ]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+
+        $project_name = DB::table("projects")
+            ->where("id", $request->project_id)
+            ->value("project_name");
+
+        $project_status_id = DB::table("projects")
+            ->where("id", $request->project_id)
+            ->value("status_id");    
+
+        $project_status = DB::table("project_status_master")
+            ->where("id", $project_status_id)
+            ->first();    
+
+        $fields =  [
+            "task.id",
+            "task.project_id",
+            "task.task_template_id",
+            "task.file_link",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.duration",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.time",
+            "task.view",
+            "task_status_master.status as task_status",
+        ];
+        $staff_id = (string)session('staff_id');
+
+        $task_list = DB::table("task")
+            ->leftjoin("task_status_master", "task_status_master.id", "task.status")
+            ->where("project_id", $request->project_id)->orderBy("task.created_at", "desc")->get($fields);
+        // subtask list
+        foreach ($task_list as $row) {
+            $row->name = null;
+            if ($row->assignee != null) {
+                $assignee = json_decode($row->assignee);
+                // $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                $staff_shortname = DB::table('staff')->whereIn('sid', $assignee)->pluck('short_name');
+                $row->name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+            }
+            else
+            {
+                $row->assignee_name='';
+            }
+            $row->subtask_list = DB::table('subtask')
+                ->leftjoin("task", "task.id", "subtask.task_id")
+                ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as task_status"]);
+        }
+        //project tasks list
+        $fields = [
+            "task.id",
+            "task.project_id",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.duration",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.time",
+            "task.view",
+            "task.created_at",
+            "staff.name as staff_name",
+            "projects.project_name",
+            "projects.start_date as project_start_date",
+            "projects.end_date  as project_end_date",
+            "projects.service_id as poject_service_id",
+            "projects.created_at as poject_created_at",
+            "task_status_master.status as task_status",
+        ];
+
+        $project_tasks_list = DB::table("task")
+            ->leftjoin("projects", "projects.id", "task.project_id")
+            ->leftjoin("staff", "staff.sid", "task.assignee")
+            ->leftjoin(
+                "task_status_master",
+                "task_status_master.id",
+                "task.status"
+            );
+        if ($request->project_id != "") {
+            $project_tasks_list = $project_tasks_list->where(
+                "task.project_id",
+                $request->project_id
+            );
+        }
+
+        $project_tasks_list = $project_tasks_list->get($fields);
+        $task_New = [];
+        $task_in_progress = [];
+        $task_Onhold_payment = [];
+        $task_Onhold_Document = [];
+        $task_Completed = [];
+        $task_Senior_Review = [];
+        $task_Cancelled = [];
+        foreach ($project_tasks_list as $row) {
+            if ($row->task_status == "New") {
+                $task_New[] = $row;
+            } elseif ($row->task_status == "In Progress") {
+                $task_in_progress[] = $row;
+            } elseif ($row->task_status == "On Hold- Payment") {
+                $task_Onhold_payment[] = $row;
+            } elseif ($row->task_status == "On Hold- Documents") {
+                $task_Onhold_Document[] = $row;
+            } elseif ($row->task_status == "Completed") {
+                $task_Completed[] = $row;
+            } elseif ($row->task_status == "Senior Review") {
+                $task_Senior_Review[] = $row;
+            } elseif ($row->task_status == "Cancelled") {
+                $task_Cancelled[] = $row;
+            }
+        }
+        //End project tasks list
+
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        return view(
+            "pages.task.projects_task",
+            compact(
+                "services_list",
+                "staff_list",
+                "task_list",
+                "project_status_master",
+                "task_status_master",
+                "project_name",
+                "project_tasks_list",
+                "task_New",
+                "task_in_progress",
+                "task_Onhold_payment",
+                "task_Onhold_Document",
+                "task_Completed",
+                "task_Senior_Review",
+                "task_Cancelled",
+                "task_priority",
+                "task_type",
+                "project_id",
+                "project_list",
+                "project_status",
+                "office_list"
+            )
+        );
+    }
+    public function add_task(Request $request)
+    {
+        try {
+            log::info("add task");
+            $v = Validator::make($request->all(), [
+                "title" => "string|required",
+                "description" => "nullable",
+                "type" => "nullable",
+                "priority" => "nullable",
+                "assignee" => "nullable",
+                "start_date" => "nullable",
+                "end_date" => "nullable",
+                "due_date" => "nullable",
+                "status" => "nullable",
+                "is_milestone" => "nullable",
+                "office_id" => "nullable",
+                "working_hr" => "nullable"
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+
+            $title = $request->title;
+            $description = $request->description;
+            $type = $request->type;
+            $priority = $request->priority;
+            $assignee = $request->assignee;
+            $assignee = explode(',', $assignee);
+            // $assig=array();
+            //  for($a=0;$a<sizeof($assignee);$a++)
+            //  {
+            //     array_push($assig,(int)$assignee[$a]);
+            //  }
+            // $assignee=$assig;
+            $status = $request->status;
+            $is_milestone = $request->is_milestone;
+            $project_id = $request->project_id;
+            $template_id = $request->template_id;
+
+            $office_id = $request->office_id;
+            $view = $request->view;
+            if($view=='')
+            {
+                $view='internal';
+            }
+            $working_hr = null;
+
+
+            $file_link = null;
+            $file = $request->file;
+            if ($request->staff_id != null ||  $request->staff_id != '') {
+                $created_by = $request->staff_id;
+            } else {
+                $created_by = session("staff_id");
+            }
+
+            $assign_date = null;
+            if ($assignee != null) {
+                $assign_date = date("Y-m-d");
+            }
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+            // multi files upload
+            $multi_file_links = [];
+            if ($request->hasFile('multi_files')) {
+                $multi_files = $request->file('multi_files');
+                foreach ($multi_files as $key => $file) {
+                    // $filename = strtolower($file->getClientOriginalName());
+                    // $extension = strtolower($file->getClientOriginalExtension());
+                    // $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                    // $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                    $filename = 'file_' . rand(11111, 99999) . '_' . time() . '.' . $file->getClientOriginalExtension();
+                    $foldername = 'task';
+                    $path = $foldername . '/' . $filename;
+                    Storage::disk("s3_quotations")->put($path, fopen($file->getRealPath(), 'r+'), "public");
+                    $target_file = Storage::disk("s3_quotations")->url($path);
+                    if ($target_file) {
+                        $multi_file_links[] = $target_file;
+                    } else {
+                        Log::error("File Can't be uploaded");
+                        return response()->json([
+                            "status" => "error",
+                            "msg" => "File Can`t be uploaded",
+                        ]);
+                    }
+                }
+            }
+            foreach ($multi_file_links as $filelink) {
+                $savefile_links = DB::table("task_multi_file_links")->insert([
+                    "task_id" => $task_id,
+                    "file_link" => $filelink,
+                    "created_at" => now(),
+                ]);
+            }
+            // END multi files upload
+
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+
+            if ($request->task_start_date != null) {
+                $start_date = str_replace("/", "-", $request->task_start_date);
+                $start_date = date("Y-m-d", strtotime($start_date));
+            }
+            if ($request->task_end_date != null) {
+                $end_date = str_replace("/", "-", $request->task_end_date);
+                $end_date = date("Y-m-d", strtotime($end_date));
+            }
+            if ($start_date != null && $end_date != null) {
+                $duration =
+                    $this->dateDiffInDays($start_date, $end_date) . " Days";
+            }
+
+            //start_date , end_date
+            if ($request->start_date != null && $request->end_date != null) {
+                $start_date = $request->start_date;
+                $end_date = $request->end_date;
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //END
+
+            if($request->working_hr != null){
+              $todayDate = date('d-m-Y');
+              $Arr[] = [$todayDate => $request->working_hr];
+              $working_hr = json_encode($Arr);//[{"01-05-2024":5}]
+            }
+            $time=$request->task_hearing_time;
+            $task_id = DB::table("task")->insertGetId([
+                "project_id" => $project_id,
+                "task_template_id" => $template_id,
+                "file_link" => $file_link,
+                "title" => $title,
+                "description" => $description,
+                "type" => $type,
+                "priority" => $priority,
+                "assignee" => json_encode($assignee),
+                "due_date" => $due_date,
+                "start_date" => $start_date,
+                "end_date" => $end_date,
+                "duration" => $duration,
+                "is_milestone" => $is_milestone,
+                "assign_date" => $assign_date,
+                "status" => $status,
+                "office_id" => $office_id,
+                "working_hr" => $working_hr,
+                "time"=>$time,
+                "view"=>$view,
+                "created_by" => $created_by,
+                "created_at" => now(),
+            ]);
+
+            if ($task_id) {
+                //Task logs
+                $task_logs = DB::table("task_logs")->insert([
+                    "task_id" => $task_id,
+                    "project_id" => $project_id,
+                    "task_template_id" => $template_id,
+                    "file_link" => $file_link,
+                    "title" => $title,
+                    "description" => $description,
+                    "type" => $type,
+                    "priority" => $priority,
+                    "assignee" => json_encode($assignee),
+                    "due_date" => $due_date,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "duration" => $duration,
+                    "is_milestone" => $is_milestone,
+                    "assign_date" => $assign_date,
+                    "status" => $status,
+                    "created_by" => $created_by,
+                    "created_at" => now(),
+                ]);
+
+                for ($i = 0; $i < sizeof($assignee); $i++) {
+                    log::info('$assignee=' . $assignee[$i]);
+                    $insert_mapping = DB::table('task_assignee')->insert(['task_id' => $task_id, 'assignee' => $assignee[$i]]);
+                }
+                log::info('notification=' . json_encode($assignee));
+                $module = 'task';
+                $this->send_push_notification('New Task assign', $title, $assignee, 'task', $icon = '', $module);
+                $task_list = DB::table("task")
+
+                    ->leftjoin(
+                        "task_status_master",
+                        "task_status_master.id",
+                        "task.status"
+                    )
+                    ->where("project_id", $request->project_id)
+                    ->orderBy("task.created_at", "desc")
+                    ->get([
+                        "task.id",
+                        "task.project_id",
+                        "task.task_template_id",
+                        "task.file_link",
+                        "task.title",
+                        "task.description",
+                        "task.type",
+                        "task.priority",
+                        "task.assignee",
+                        "task.due_date",
+                        "task.start_date",
+                        "task.end_date",
+                        "task.duration",
+                        "task.is_milestone",
+                        "task.status",
+                        "task.time",
+                        "task.view",
+                        "task_status_master.status as task_status",
+                    ]);
+                // subtask list
+                foreach ($task_list as $row) {
+                    if($row->assignee!='')
+                    {
+                          $assignee = json_decode($row->assignee);
+                    $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                    $row->name = rtrim(implode(',', json_decode($staff_name)), ',');
+                    }
+                    else
+                    {
+                        $row->name='';
+                    }
+                  
+                    $row->subtask_list = DB::table('subtask')
+                        ->leftjoin("task", "task.id", "subtask.task_id")
+                        ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                        ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                        ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as task_status"]);
+                }
+                return response()->json([
+                    'body' => view("pages.task.project_task_table", compact("task_list"))->render(),
+                    'task_id' => $task_id,
+                    'status' => 'success',
+                    'msg' => "task id ".$task_id." has been created successfully"
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Task Can`t be Created",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function update_task(Request $request)
+    {
+        try {
+            log::info("update task");
+
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+
+            log::info('update task id=' . $request->id);
+            $office_id = $request->office_id;
+            // get working_hr old data same date update hour plus
+            $working_hr = DB::table('task')->where('id',$request->id)->value('working_hr');
+            if($working_hr != null && $request->working_hr != null){
+                // $jsonString = '[{"01-05-2024":"3"},{"03-05-2024":"8"},{"04-05-2024":"9"}]';
+                // Decode the JSON string
+                $jsonString = json_decode($working_hr, true);
+                $updatedData = [];
+                $arr = [];
+                $isUpdate = false;
+                foreach ($jsonString as $item) {
+                  $date = key($item); 
+                  if ($date === date('d-m-Y')) {
+                    $updatedData[$date] = isset($updatedData[$date]) ? $updatedData[$date] + $item[$date] : $item[$date] + $request->working_hr;
+                    $arr[]=[$date => $updatedData[$date]];
+                    $isUpdate = true;
+                  }else{
+                    $arr[] = [$date => $item[key($item)]];
+                  }
+                }
+                if(!$isUpdate){
+                      $todayDate = date('d-m-Y');
+                      $arr[] = [$todayDate => $request->working_hr];
+                }
+                $working_hr = json_encode($arr);
+            }else{
+                if($request->working_hr != null){
+                  $todayDate = date('d-m-Y');
+                  $Arr[] = [$todayDate => $request->working_hr];
+                  $working_hr = json_encode($Arr);//[{"01-05-2024":5}]
+                }
+            }
+            if ($request->staff_id != null ||  $request->staff_id != '') {
+                $updated_by = $request->staff_id;
+            } else {
+                $updated_by = session("staff_id");
+            }
+
+
+            $assignee = $request->assignee;
+            if ($assignee != null) {
+                $assignee = explode(',', $assignee);
+                // $assig=array();
+                //  for($a=0;$a<sizeof($assignee);$a++)
+                //  {
+                //     array_push($assig,(int)$assignee[$a]);
+                //  }
+                // $assignee=$assig;
+            }
+
+            //assignee change then assign date update
+            $task_assignee_data = DB::table("task")
+                ->where("id", $request->id)
+                ->first(["assign_date"]);
+            $assign_date = $task_assignee_data->assign_date;
+
+            //multiple assignee update or delete
+            if ($assignee != null && count($assignee) > 0) {
+                // Delete the previous mappings
+                $newAssigneeIds = [];
+                $pre_staff_count = DB::table("task_assignee")->where(
+                    "task_id",
+                    $request->id
+                )->count();
+
+                if ($pre_staff_count > 0) {
+                    //new assignee ids find
+                    foreach ($assignee as $staffId) {
+                        $checkAssigneeId = DB::table("task_assignee")
+                            ->where("task_id", $request->id)
+                            ->where("assignee", $staffId)
+                            ->count();
+                        if ($checkAssigneeId == 0) {
+                            $newAssigneeIds[] = $staffId;
+                        }
+                    }
+
+                    $previous_staff_delete = DB::table("task_assignee")->where(
+                        "task_id",
+                        $request->id
+                    )->delete();
+                } else {
+                    $newAssigneeIds =  $assignee;
+                }
+                if ($newAssigneeIds) {
+
+                    $assign_date = date("Y-m-d");
+                    $module = 'task';
+                    log::info("here".json_encode($newAssigneeIds));
+                    $this->send_push_notification('New Task assign', $request->title,$newAssigneeIds, 'task', $icon = '', $module);
+                }
+                for ($i = 0; $i < sizeof($assignee); $i++) {
+                    log::info('$assignee=' . $assignee[$i]);
+                    $insert_mapping = DB::table('task_assignee')->insert(['task_id' => $request->id, 'assignee' => $assignee[$i]]);
+                }
+            } else {
+                Log::info('unassigned');
+                $pre_staff_count = DB::table("task_assignee")->where(
+                    "task_id",
+                    $request->id
+                )->count();
+                if ($pre_staff_count > 0) {
+                    $removeAssigneeIds = DB::table("task_assignee")->where(
+                        "task_id",
+                        $request->id
+                    )->get();
+                    $AssigneeIds = array_column(json_decode($removeAssigneeIds, true), 'assignee');
+                    $previous_staff_delete = DB::table("task_assignee")->where(
+                        "task_id",
+                        $request->id
+                    )->delete();
+                    Log::info('unassigned ids');
+                    Log::info(json_encode($AssigneeIds));
+                    $module = 'task';
+                    $this->send_push_notification($request->title, 'You have unassigned from this task', [$AssigneeIds], 'task', $icon = '', $module);
+                }
+            }
+            //END multiple assignee update or delete
+
+
+
+
+            if ($request->wantsJson()) {
+                $start_date = $request->start_Date;
+                $end_date = $request->end_date;
+            } else {
+                if ($request->task_start_date != null) {
+                    $start_date = str_replace("/", "-", $request->task_start_date);
+                    $start_date = date("Y-m-d", strtotime($start_date));
+                }
+                if ($request->task_end_date != null) {
+                    $end_date = str_replace("/", "-", $request->task_end_date);
+                    $end_date = date("Y-m-d", strtotime($end_date));
+                }
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+
+            //start_date , end_date
+            if ($request->start_date != null && $request->end_date != null) {
+                $start_date = $request->start_date;
+                $end_date = $request->end_date;
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //END
+
+
+            $file_link = $request->file_link;
+            $file = $request->file;
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+            //update or delete records multi file 
+            $countLinks = DB::table("task_multi_file_links")->where("task_id", $request->id)->count();
+            if ($countLinks > 0) {
+                //delete files
+                if ($request->has('update_multi_links')) {
+                    if (count($request->update_multi_links)) {
+                        $linkToKeep = $request->update_multi_links;
+                        // Delete records where Links are not in the array
+                        DB::table("task_multi_file_links")
+                            ->where('task_id', $request->id)
+                            ->whereNotIn('file_link', $linkToKeep)
+                            ->delete();
+                    }
+                } else {
+                    // Handle the case variable is request not send
+                    DB::table("task_multi_file_links")->where('task_id', $request->id)->delete();
+                }
+            }
+
+            $multi_file_links = [];
+            if ($request->hasFile('multi_files')) {
+                $multi_files = $request->file('multi_files');
+                foreach ($multi_files as $key => $file) {
+                    // $filename = strtolower($file->getClientOriginalName());
+                    // $extension = strtolower($file->getClientOriginalExtension());
+                    // $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                    // $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                    $filename = 'file_' . rand(11111, 99999) . '_' . time() . '.' . $file->getClientOriginalExtension();
+                    $foldername = 'task';
+                    $path = $foldername . '/' . $filename;
+                    Storage::disk("s3_quotations")->put($path, fopen($file->getRealPath(), 'r+'), "public");
+                    $target_file = Storage::disk("s3_quotations")->url($path);
+                    if ($target_file) {
+                        $multi_file_links[] = $target_file;
+                    } else {
+                        Log::error("File Can't be uploaded");
+                        return response()->json([
+                            "status" => "error",
+                            "msg" => "File Can`t be uploaded",
+                        ]);
+                    }
+                }
+            }
+            foreach ($multi_file_links as $filelink) {
+                $savefile_links = DB::table("task_multi_file_links")->insert([
+                    "task_id" => $task_id,
+                    "file_link" => $filelink,
+                    "created_at" => now(),
+                ]);
+            }
+            //END update or delete records multi file 
+
+            $id = $request->id;
+            // Find the record you want to update
+            $record = DB::table('task')->where('id', $id)->first();
+            $originalValues = (array) $record;
+
+            $assignee = $assignee != null ?  json_encode($assignee) : $assignee;
+            $today=date('Y-m-d');
+            $status_arr=array(3,4,5,7);
+            $prev_status=DB::table('task')->where('id',$request->id)->value('status');
+            if($prev_status!=$request->status)
+            {
+                if (in_array($request->status,$status_arr) && $end_date!=$today)
+                {
+                   
+                   log::info('inside id status');
+                    return response()->json(array('status' => 'error', 'msg' => 'The end date of this task is not current date. Please change this to current date before changing the status.'));
+                   
+                  
+                   
+                }
+                log::info('inside id status1');
+            }
+            else
+            {
+                 log::info('inside id status');
+            }
+             $time=$request->task_hearing_time;
+              $task_id=$request->id;
+              $view=$request->view;
+            $update = DB::table("task")
+                ->where("id", $request->id)
+                ->update([
+                    "title" => $request->title,
+                    "project_id" => $request->project_id,
+                    "task_template_id" => $request->template_id,
+                    "file_link" => $file_link,
+                    "description" => $request->description,
+                    "type" => $request->type,
+                    "priority" => $request->priority,
+                    "assignee" => $assignee,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "due_date" => $due_date,
+                    "duration" => $duration,
+                    "is_milestone" => $request->is_milestone,
+                    "status" => $request->status,
+                    "assign_date" => $assign_date,
+                    "office_id" => $office_id,
+                    "working_hr" => $working_hr,
+                    "time"=>$time,
+                    "view"=>$view,
+                    "updated_by" => $updated_by,
+                    "updated_at" => now(),
+                ]);
+            //------------------logging------------//
+            $updatedValues = DB::table('task')->where('id', $id)->first();
+
+            // Determine which columns were updated
+            $updatedColumns = [];
+            $updatedColumnValues = [];
+            foreach ($originalValues as $column => $originalValue) {
+                $updatedValue = $updatedValues->{$column};
+                if ($originalValue !== $updatedValue) {
+                    $updatedColumns[] = $column;
+                    $updatedColumnValues[$column] = [
+                        'old' => $originalValue,
+                        'new' => $updatedValue,
+                    ];
+                }
+            }
+            $upcol = array();
+            $oldval = array();
+            $newval = array();
+            foreach ($updatedColumnValues as $column => $values) {
+                $upcol[] = $column;
+                $oldval[] = $values['old'];
+                $newval[] = $values['new'];
+            }
+            $updated_col = json_encode($upcol);
+            $old_value = json_encode($oldval);
+            $new_value = json_encode($newval);
+            $primary_id = $id;
+            $table_name = 'task';
+            $description = 'column= ' . $updated_col . '. update old_value=' . $old_value . '. with new value=' . $new_value . '.on date=' . date('d-m-Y h:i A') . '. updated_by=' . session('staff_id');
+            //------------------------end logging-------------------------------------//
+            if ($update) {
+                //Task logs
+                $res = $this->table_log($primary_id, $table_name, $old_value, $new_value, $description, $updated_col);
+                $task_logs = DB::table("task_logs")->insert([
+                    "title" => $request->title,
+                    "task_id" => $task_id,
+                    "project_id" => $request->project_id,
+                    "task_template_id" => $request->template_id,
+                    "file_link" => $file_link,
+                    "description" => $request->description,
+                    "type" => $request->type,
+                    "priority" => $request->priority,
+                    "assignee" => $assignee,
+                    "due_date" => $due_date,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "duration" => $duration,
+                    "is_milestone" => $request->is_milestone,
+                    "assign_date" => $assign_date,
+                    "status" => $request->status,
+                    "updated_by" => $updated_by,
+                    "created_at" => now(),
+                ]);
+                if ($res == 'success') {
+                    return response()->json(array('status' => 'success', 'msg' => 'Task Updated successfully'));
+                } else {
+                    return response()->json(array('status' => 'error', 'msg' => 'Task Updated successfully but log can`t be saved'));
+                }
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Task Can`t be Updated",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function get_task_list(Request $request)
+    {
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.created_at",
+                "task.time",
+                "task.view",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at"
+
+            ];
+            $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+            $task_status = DB::table("task_status_master")->where('id','!=',5)->get(["id", "status"]);
+            $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+            $task_status_master = $task_status;
+            foreach ($task_status as $tsk) {
+                if (session('role_id') == 1) {
+                    $task_list = DB::table("task")
+                        ->leftjoin("projects", "projects.id", "task.project_id")->where('task.status', $tsk->id)->get($fields);
+                } else {
+                    $staff_id = session('staff_id');
+                    //$staff_id = (string)$staff_id;
+                   $project_ids=DB::table('projects')->leftjoin("projects_assignee","projects_assignee.projects_id","projects.id")->whereNotIn('projects.status_id',[5,6])->where('projects_assignee.staff_id', $staff_id)->pluck('projects.id');
+                    $tsk_status=$tsk->id;
+                   $task_list = DB::table("task")
+                        ->leftjoin("projects", "projects.id", "task.project_id")
+                        ->where(function ($query) use ($project_ids,$tsk_status) {
+                        $query->where('task.status', $tsk_status);
+                        $query->whereIn('task.project_id',$project_ids);
+                         })->orWhere(function ($query) use ($project_ids,$tsk_status) {
+                        $query->where('task.status', $tsk_status);
+                        $query->whereNull('task.project_id');
+                        $query->whereJsonContains('task.assignee', (string)session('staff_id'));
+                         })->get($fields);
+                    
+                
+                        }
+                foreach ($task_list as $row) {
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    if ($row->assignee != null) {
+                        $assignee = json_decode($row->assignee);
+                        // $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                        $staff_shortname = DB::table('staff')->whereIn('sid', $assignee)->pluck('short_name');
+                        $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                    } else {
+                        $row->assignee_name = '';
+                    }
+                    //office 
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+                $tsk->task = $task_list;
+            }
+
+
+
+
+
+            return view(
+                "pages.task.task_list",
+                compact(
+                    'task_status',
+                    'task_type',
+                    'task_priority',
+                    'task_status_master'
+                )
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function task_filter(Request $request)
+    {
+        try {
+
+            Log::info("inside task_filter");
+            $task_filter_type = $request->task_filter_type;
+            $task_filter_status = $request->task_filter_status;
+            $task_filter_priority = $request->task_filter_priority;
+            $task_filter_from_date = $request->task_filter_from_date;
+            $task_filter_to_date = $request->task_filter_to_date;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at"
+
+            ];
+            $staff = $this->get_staff_list();
+            $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+            $task_status_master = DB::table("task_status_master")->get(["id", "status"]);
+            $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+
+
+
+            foreach ($staff as $sid) {
+                $staff_id = $sid->sid;
+                $staff_id = (string)$staff_id;
+                $task_list = DB::table("task")
+                    ->leftjoin("projects", "projects.id", "task.project_id");
+
+                $task_list = $task_list->where(function ($query) use ($staff_id, $task_filter_type, $task_filter_status, $task_filter_priority, $task_filter_from_date, $task_filter_to_date) {
+                    $query->whereJsonContains('task.assignee', $staff_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($task_filter_type != '') {
+                        $query->whereIn('type', $task_filter_type);
+                    }
+                    if ($task_filter_priority != '') {
+                        $query->whereIn('priority', $task_filter_priority);
+                    }
+                    if ($task_filter_from_date != '') {
+                        $task_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_from_date)));
+                        $query->where('task.start_date', '>=', $task_filter_from_date);
+                    }
+                    if ($task_filter_to_date != '') {
+                        $task_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_to_date)));
+                        $query->where('task.start_date', '<=', $task_filter_to_date);
+                    }
+                })->orWhere(function ($query) use ($staff_id, $task_filter_type, $task_filter_status, $task_filter_priority, $task_filter_from_date, $task_filter_to_date) {
+                    $query->whereJsonContains('task.assignee', $staff_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($task_filter_type != '') {
+                        $query->whereIn('type', $task_filter_type);
+                    }
+                    if ($task_filter_priority != '') {
+                        $query->whereIn('priority', $task_filter_priority);
+                    }
+                    if ($task_filter_from_date != '') {
+                        $task_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_from_date)));
+                        $query->where('task.end_date', '>=', $task_filter_from_date);
+                    }
+                    if ($task_filter_to_date != '') {
+                        $task_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_to_date)));
+                        $query->where('task.end_date', '<=', $task_filter_to_date);
+                    }
+                });
+
+
+
+
+
+
+
+
+
+                $task_list = $task_list->get($fields);
+                foreach ($task_list as $row) {
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    if ($row->assignee != null) {
+                        $assignee = json_decode($row->assignee);
+                        $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                        $row->assignee_name = rtrim(implode(',', json_decode($staff_name)), ',');
+                    } else {
+                        $row->assignee_name = '';
+                    }
+                    //office 
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+                $sid->task = $task_list;
+            }
+
+
+
+
+
+            return view(
+                "pages.task.get_staff_wise_task",
+                compact(
+                    'staff',
+                    'task_type',
+                    'task_priority',
+                    'task_status_master'
+                )
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function get_staff_wise_task(Request $request)
+    {
+        
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            $staff = $this->get_staff_list();
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            foreach ($staff as $sid) {
+                $staff_id = $sid->sid;
+               
+                $staff_id = $staff_id;
+              
+                    $tsk_status=array(5,7);
+
+                 $project_ids=DB::table('projects')->leftjoin("projects_assignee","projects_assignee.projects_id","projects.id")->whereNotIn('projects.status_id',[5,6])->where('projects_assignee.staff_id', $staff_id)->pluck('projects.id');
+                     $task_list = DB::table("task")
+                         ->leftjoin("projects", "projects.id", "task.project_id")
+                         ->leftjoin(
+                        "task_status_master",
+                        "task_status_master.id",
+                        "task.status"
+                       )->where(function ($query) use ($project_ids,$tsk_status) {
+                       $query->whereNotIn('task.status',$tsk_status);
+                        $query->whereIn('task.project_id',$project_ids);
+                         })->orWhere(function ($query) use ($project_ids,$tsk_status,$staff_id) {
+                       $query->whereNotIn('task.status',$tsk_status);
+                        $query->whereNull('task.project_id');
+                        $query->whereJsonContains('task.assignee', (string)$staff_id);
+                         })->get($fields);
+
+                foreach ($task_list as $row) {
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                    //office 
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+                $sid->task = $task_list;
+            }
+
+
+            return view(
+                "pages.task.get_staff_wise_task",
+                compact('staff')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    
+    }
+    public function get_task_data(Request $request)
+    {
+        try {
+            Log::info("inside get_task_id");
+            $data = DB::table("task")
+                ->where("id", $request->id)
+                ->get();
+            return response()->json(["status" => "success", "data" => $data]);
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function delete_task(Request $request)
+    {
+        try {
+            $delete = DB::table("task")
+                ->where("id", $request->id)
+                ->delete();
+            if ($delete) {
+                //subTask check to delete
+                $countSubtask = DB::table("subtask")
+                    ->where("task_id", $request->id)->count();
+                if ($countSubtask > 0) {
+                    $delSubtask = DB::table("subtask")
+                        ->where("task_id", $request->id)
+                        ->delete();
+                }
+                return response()->json([
+                    "status" => "success",
+                    "msg" => "Task Deleted successfully",
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Task Can`t be Deleted!",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    // New Projects
+    public function new_project(Request $request)
+    {
+        try {
+            Log::info("Inside New project");
+
+
+            $projectName_exists = DB::table("projects")
+                ->where("project_name", $request->project_name)
+                ->count();
+            if ($projectName_exists > 0) {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Project Already Created For This Service",
+                ]);
+            } else {
+                $start_date = null;
+                $end_date = null;
+                if ($request->project_start_date != null) {
+
+
+                    $start_date = str_replace("/", "-", $request->project_start_date);
+                    $start_date = date("Y-m-d", strtotime($start_date));
+                }
+
+                if ($request->project_end_date != null) {
+                    $end_date = str_replace("/", "-", $request->project_end_date);
+                    $end_date = date("Y-m-d", strtotime($end_date));
+                }
+
+                $projects_id = DB::table("projects")->insertGetId([
+                    "status_id" => $request->status,
+                    "client_id" => $request->client_id,
+                    "case_no" => $request->case_no,
+                    "project_name" => $request->project_name,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "quotation_id" => $request->quotation_id,
+                    // "staff_id" =>null,
+                    "service_id" => $request->service_id,
+                    "created_at" => now(),
+                ]);
+                if ($projects_id) {
+                    //multiple assignee
+                    $staff_ids = null;
+                    if ($request->staff_id != null) {
+                        $staff_ids = $request->staff_id;
+                        foreach ($staff_ids as $staff_id) {
+                            $insert = DB::table("projects_assignee")->insert([
+                                "projects_id" => $projects_id,
+                                "staff_id" => $staff_id,
+                                "created_at" => now()
+                            ]);
+                        }
+                    }
+                    $module = 'task';
+                    $this->send_push_notification('New project assign', $request->project_name, [$request->staff_id], 'task', $icon = '', $module);
+                    return response()->json([
+                        "status" => "success",
+                        "msg" => "Project Created successfully",
+                    ]);
+                } else {
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "Project can`t be created",
+                    ]);
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json(
+                ["status" => "error", "msg" => "Something Went Wrong"],
+                500
+            );
+        }
+    }
+    public function get_project_data(Request $request)
+    {
+        try {
+            Log::info("inside get_task_id");
+            $data = DB::table("projects")
+                ->where("id", $request->id)
+                ->get();
+            return response()->json(["status" => "success", "data" => $data]);
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function update_project(Request $request)
+    {
+        try {
+            log::info("update task");
+            $v = Validator::make($request->all(), [
+                "project_name" => "string|required",
+                "staff_id" => "nullable",
+                "service_id" => "nullable",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $start_date = null;
+            $end_date = null;
+            if ($request->project_start_date != null) {
+
+
+                $start_date = str_replace("/", "-", $request->project_start_date);
+                $start_date = date("Y-m-d", strtotime($start_date));
+            }
+
+            if ($request->project_end_date != null) {
+                $end_date = str_replace("/", "-", $request->project_end_date);
+                $end_date = date("Y-m-d", strtotime($end_date));
+            }
+            //multiple assignee update or delete
+            if ($request->staff_id != null && count($request->staff_id) > 0) {
+                // Delete the previous mappings
+                $pre_staff_count = DB::table("projects_assignee")->where(
+                    "projects_id",
+                    $request->id
+                )->count();
+                if ($pre_staff_count > 0) {
+                    $previous_staff_delete = DB::table("projects_assignee")->where(
+                        "projects_id",
+                        $request->id
+                    )->delete();
+                }
+                // if($previous_staff_delete){
+                $staff_ids = $request->staff_id;
+                foreach ($staff_ids as $staff_id) {
+                    $insert = DB::table("projects_assignee")->insert([
+                        "projects_id" => $request->id,
+                        "staff_id" => $staff_id,
+                        "created_at" => now()
+                    ]);
+                }
+                // }
+            } else {
+                $pre_staff_count = DB::table("projects_assignee")->where(
+                    "projects_id",
+                    $request->id
+                )->count();
+                if ($pre_staff_count > 0) {
+                    $previous_staff_delete = DB::table("projects_assignee")->where(
+                        "projects_id",
+                        $request->id
+                    )->delete();
+                }
+            }
+            //------------------ Project update logging------------//
+            $id = $request->id;
+            $record = DB::table('projects')->where('id', $id)->first();
+            $originalValues = (array) $record;
+            //-----------------------//
+
+            $update = DB::table("projects")
+                ->where("id", $request->id)
+                ->update([
+                    "status_id" => $request->status,
+                    "project_name" => $request->project_name,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "service_id" => $request->service_id,
+                    "updated_at" => now()
+                ]);
+
+            //------------------logging------------//
+            $updatedValues = DB::table('projects')->where('id', $id)->first();
+
+            // Determine which columns were updated
+            $updatedColumns = [];
+            $updatedColumnValues = [];
+            foreach ($originalValues as $column => $originalValue) {
+                $updatedValue = $updatedValues->{$column};
+                if ($originalValue !== $updatedValue) {
+                    $updatedColumns[] = $column;
+                    $updatedColumnValues[$column] = [
+                        'old' => $originalValue,
+                        'new' => $updatedValue,
+                    ];
+                }
+            }
+            $upcol = array();
+            $oldval = array();
+            $newval = array();
+            foreach ($updatedColumnValues as $column => $values) {
+                $upcol[] = $column;
+                $oldval[] = $values['old'];
+                $newval[] = $values['new'];
+            }
+            $updated_col = json_encode($upcol);
+            $old_value = json_encode($oldval);
+            $new_value = json_encode($newval);
+            $primary_id = $id;
+            $table_name = 'projects';
+            $description = 'column= ' . $updated_col . '. update old_value=' . $old_value . '. with new value=' . $new_value . '.on date=' . date('d-m-Y h:i A') . '. updated_by=' . session('staff_id');
+            //------------------------end logging-------------------------------------//
+
+            if ($update) {
+                $res = $this->table_log($primary_id, $table_name, $old_value, $new_value, $description, $updated_col);
+                if ($res == 'success') {
+                    return response()->json(array('status' => 'success', 'msg' => 'Project Updated successfully'));
+                } else {
+                    return response()->json(array('status' => 'error', 'msg' => 'Project Updated successfully but log can`t be saved'));
+                }
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Project can`t be updated",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    public function delete_project(Request $request)
+    {
+        try {
+            $delete = DB::table("projects")
+                ->where("id", $request->id)
+                ->delete();
+            if ($delete) {
+                return response()->json([
+                    "status" => "success",
+                    "msg" => "Project Deleted successfully",
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Project can`t be deleted!",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    // New Template
+    public function add_template(Request $request)
+    {
+        try {
+            Log::info("Inside New template");
+            $v = Validator::make($request->all(), [
+                "template_name" => "string|required",
+                "status" => "nullable",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+
+            $templateName_exists = DB::table("main_template")
+                ->where("template_name", $request->template_name)
+                ->count();
+            if ($templateName_exists > 0) {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Template Name Already Exists",
+                ]);
+            } else {
+                $insert = DB::table("main_template")->insert([
+                    "template_name" => $request->template_name,
+                    "description" => $request->description,
+                    "status" => "active",
+                    "created_at" => now(),
+                ]);
+                if ($insert) {
+                    return response()->json([
+                        "status" => "success",
+                        "msg" => "Template Created successfully",
+                    ]);
+                } else {
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "Template can`t be created",
+                    ]);
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json(
+                [
+                    "status" => "error",
+                    "msg" =>
+                    "Something went wrong,please contact to support team.",
+                ],
+                500
+            );
+        }
+    }
+    public function get_template_data(Request $request)
+    {
+        try {
+            Log::info("inside get_Template_id");
+            $data = DB::table("main_template")
+                ->where("id", $request->id)
+                ->get();
+            return response()->json(["status" => "success", "data" => $data]);
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function update_template(Request $request)
+    {
+        try {
+            log::info("update Template");
+            $v = Validator::make($request->all(), [
+                "template_name" => "string|required",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            //------------------ main_template update logging------------//
+            $id = $request->id;
+            $record = DB::table('main_template')->where('id', $id)->first();
+            $originalValues = (array) $record;
+            //-----------------------//
+            $update = DB::table("main_template")
+                ->where("id", $request->id)
+                ->update([
+                    "template_name" => $request->template_name,
+                    "description" => $request->description,
+                    "status" => $request->status,
+                    "updated_at" => now(),
+                ]);
+            //------------------logging------------//
+            $updatedValues = DB::table('main_template')->where('id', $id)->first();
+
+            // Determine which columns were updated
+            $updatedColumns = [];
+            $updatedColumnValues = [];
+            foreach ($originalValues as $column => $originalValue) {
+
+                $updatedValue = $updatedValues->{$column};
+                if ($originalValue !== $updatedValue) {
+                    $updatedColumns[] = $column;
+                    $updatedColumnValues[$column] = [
+                        'old' => $originalValue,
+                        'new' => $updatedValue,
+                    ];
+                }
+            }
+            $upcol = array();
+            $oldval = array();
+            $newval = array();
+            foreach ($updatedColumnValues as $column => $values) {
+                $upcol[] = $column;
+                $oldval[] = $values['old'];
+                $newval[] = $values['new'];
+            }
+            $updated_col = json_encode($upcol);
+            $old_value = json_encode($oldval);
+            $new_value = json_encode($newval);
+            $primary_id = $id;
+            $table_name = 'main_template';
+            $description = 'column= ' . $updated_col . '. update old_value=' . $old_value . '. with new value=' . $new_value . '.on date=' . date('d-m-Y h:i A') . '. updated_by=' . session('staff_id');
+            //------------------------end logging-------------------------------------//
+            if ($update) {
+                $res = $this->table_log($primary_id, $table_name, $old_value, $new_value, $description, $updated_col);
+                if ($res == 'success') {
+                    return response()->json(array('status' => 'success', 'msg' => 'Template Updated successfully'));
+                } else {
+                    return response()->json(array('status' => 'error', 'msg' => 'Template Updated successfully but log can`t be saved'));
+                }
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Template can`t be updated",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    public function delete_template(Request $request)
+    {
+        try {
+            // $delete = DB::table('main_template')->where('id', $request->id)->delete();
+            //soft delete
+            $update = DB::table("main_template")
+                ->where("id", $request->id)
+                ->update([
+                    "status" => "inactive",
+                    "updated_at" => now(),
+                ]);
+
+            if ($update) {
+                return response()->json([
+                    "status" => "success",
+                    "msg" => "Template Deleted successfully",
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Template can`t be deleted!",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    public function add_task_template(Request $request)
+    {
+        try {
+            log::info("add task");
+            $v = Validator::make($request->all(), [
+                "title" => "string|required",
+                "description" => "nullable",
+                "type" => "nullable",
+                "priority" => "nullable",
+                "assignee" => "nullable",
+                "start_date" => "nullable",
+                "end_date" => "nullable",
+                "due_date" => "nullable",
+                "status" => "nullable",
+                "is_milestone" => "nullable",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+
+            $title = $request->title;
+            $description = $request->description;
+            $type = $request->type;
+            $priority = $request->priority;
+            $assignee = $request->assignee;
+            $status = $request->status;
+            $is_milestone = $request->is_milestone;
+            $main_template_id = $request->template_id;
+            $file_link = null;
+            $file = $request->file;
+            if ($request->staff_id != null ||  $request->staff_id != '') {
+                $created_by = $request->staff_id;
+            } else {
+                $created_by = session("staff_id");
+            }
+
+            $assign_date = null;
+            if ($assignee != null) {
+                $assign_date = date("Y-m-d");
+            }
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+
+            if ($request->task_start_date != null) {
+
+                $start_date = str_replace("/", "-", $request->task_start_date);
+                $start_date = date("Y-m-d", strtotime($start_date));
+            }
+            if ($request->task_end_date != null) {
+
+                $end_date = str_replace("/", "-", $request->task_end_date);
+                $end_date = date("Y-m-d", strtotime($end_date));
+            }
+            if ($start_date != null && $end_date != null) {
+                $duration =
+                    $this->dateDiffInDays($start_date, $end_date) . " Days";
+            }
+            $insert = DB::table("task_template")->insert([
+                "main_template_id" => $main_template_id,
+                "file_link" => $file_link,
+                "title" => $title,
+                "description" => $description,
+                "type" => $type,
+                "priority" => $priority,
+                "assignee" => $assignee,
+                "due_date" => $due_date,
+                "start_date" => $start_date,
+                "end_date" => $end_date,
+                "duration" => $duration,
+                "is_milestone" => $is_milestone,
+                "status" => $status,
+                "assign_date" => $assign_date,
+                "created_by" => $created_by,
+                "created_at" => now(),
+            ]);
+            if ($insert) {
+                return json_encode([
+                    "status" => "success",
+                    "msg" => "Task Template Created successfully",
+                ]);
+            } else {
+                return json_encode([
+                    "status" => "error",
+                    "msg" => "Task Template Can`t be Created",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+
+    public function update_task_template(Request $request)
+    {
+        try {
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+
+            $updated_by = session("staff_id");
+            //assignee change then assign date update
+            $task_assignee_data = DB::table("task_template")
+                ->where("id", $request->id)
+                ->first(["assignee", "assign_date"]);
+            $assign_date = $task_assignee_data->assign_date;
+            if ($task_assignee_data->assignee != $request->assignee) {
+                $assign_date = date("Y-m-d");
+            }
+
+            if ($request->task_date != null) {
+                //split - startdate_enddate => "08/09/2023 - 22/09/2023"
+                $date = explode("-", $request->task_date);
+                $start_date = str_replace("/", "-", $date[0]);
+                $start_date = date("Y-m-d", strtotime($start_date));
+
+                $end_date = str_replace("/", "-", $date[1]);
+                $end_date = date("Y-m-d", strtotime($end_date));
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //------------------ main_template update logging------------//
+            $id = $request->id;
+            $record = DB::table('task_template')->where('id', $id)->first();
+            $originalValues = (array) $record;
+            //-----------------------//
+            $file_link = $request->file_link;
+            $file = $request->file;
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+            $update = DB::table("task_template")
+                ->where("id", $request->id)
+                ->update([
+                    "title" => $request->title,
+                    "main_template_id" => $request->template_id,
+                    "description" => $request->description,
+                    "type" => $request->type,
+                    "priority" => $request->priority,
+                    "assignee" => $request->assignee,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "due_date" => $due_date,
+                    "duration" => $duration,
+                    "is_milestone" => $request->is_milestone,
+                    "status" => $request->status,
+                    "assign_date" => $assign_date,
+                    "file_link" => $file_link,
+                    "updated_by" => $updated_by,
+                    "updated_at" => now(),
+                ]);
+            //------------------logging------------//
+            $updatedValues = DB::table('task_template')->where('id', $id)->first();
+
+            // Determine which columns were updated
+            $updatedColumns = [];
+            $updatedColumnValues = [];
+            foreach ($originalValues as $column => $originalValue) {
+                $updatedValue = $updatedValues->{$column};
+                if ($originalValue !== $updatedValue) {
+                    $updatedColumns[] = $column;
+                    $updatedColumnValues[$column] = [
+                        'old' => $originalValue,
+                        'new' => $updatedValue,
+                    ];
+                }
+            }
+            $upcol = array();
+            $oldval = array();
+            $newval = array();
+            foreach ($updatedColumnValues as $column => $values) {
+                $upcol[] = $column;
+                $oldval[] = $values['old'];
+                $newval[] = $values['new'];
+            }
+            $updated_col = json_encode($upcol);
+            $old_value = json_encode($oldval);
+            $new_value = json_encode($newval);
+            $primary_id = $id;
+            $table_name = 'task_template';
+            $description = 'column= ' . $updated_col . '. update old_value=' . $old_value . '. with new value=' . $new_value . '.on date=' . date('d-m-Y h:i A') . '. updated_by=' . session('staff_id');
+            //------------------------end logging-------------------------------------// 
+            if ($update) {
+                $res = $this->table_log($primary_id, $table_name, $old_value, $new_value, $description, $updated_col);
+                if ($res == 'success') {
+                    return response()->json(array('status' => 'success', 'msg' => 'Task Template Updated successfully'));
+                } else {
+                    return response()->json(array('status' => 'error', 'msg' => 'Task Template Updated successfully but log can`t be saved'));
+                }
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Task Template Can`t be Updated",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function template_task(Request $request)
+    {
+        $staff_list = $this->get_staff_list();
+        $clients_list = DB::table("clients")->get(["id", "client_name", "case_no"]);
+        $project_status_master = DB::table("project_status_master")->get(["id", "status"]);
+        $task_status_master = DB::table("task_status_master")->get(["id", "status"]);
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+        $main_template_id = $request->main_template_id;
+        $main_template_data = DB::table("main_template")
+            ->where("id", $request->main_template_id)
+            ->first();
+        $main_template_name = $main_template_data->template_name;
+        $main_template_status = $main_template_data->status;
+        $main_template_description = $main_template_data->description;
+        $fields = [
+            "task_template.id",
+            "task_template.main_template_id",
+            "task_template.file_link",
+            "task_template.title",
+            "task_template.description",
+            "task_template.type",
+            "task_template.priority",
+            "task_template.assignee",
+            "task_template.due_date",
+            "task_template.start_date",
+            "task_template.end_date",
+            "task_template.duration",
+            "task_template.is_milestone",
+            "task_template.status",
+            "staff.name",
+            "task_status_master.status as task_status",
+        ];
+        $task_list = DB::table("task_template")
+            ->leftjoin("staff", "staff.sid", "task_template.assignee")
+            ->leftjoin("task_status_master", "task_status_master.id", "task_template.status")
+            ->where("main_template_id", $request->main_template_id);
+
+        if (session('role_id') != 1) {
+            $task_list = $task_list->where("task_template.assignee", session('staff_id'));
+        }
+
+        $task_list = $task_list->orderBy("task_template.created_at", "desc")->get($fields);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        return view(
+            "pages.task.template_task",
+            compact(
+                "services_list",
+                "staff_list",
+                "task_list",
+                "project_status_master",
+                "task_status_master",
+                "main_template_name",
+                "main_template_id",
+                "main_template_status",
+                "main_template_description",
+                "task_priority",
+                "task_type",
+                "project_list"
+            )
+        );
+    }
+
+    public function template_task_list(Request $request)
+    {
+        $template_task_list = DB::table("main_template")
+            ->where("status", "active")
+            ->select("id", "template_name")
+            ->orderBy("id", "desc")
+            ->get();
+        return view(
+            "pages.task.template_task_list",
+            compact("template_task_list")
+        );
+    }
+
+    public function client_project_list(Request $request)
+    {
+        $project_ids = DB::table('projects_assignee')
+            ->where('staff_id', session('staff_id'))
+            ->pluck('projects_id');
+
+        $clients_ids = DB::table("projects");
+        if (session('role_id') != 1) {
+            $clients_ids = $clients_ids->whereIn('id', $project_ids);
+        }
+        $clients_ids = $clients_ids->distinct()->get(["client_id"]);
+
+        $ids = array_column(json_decode($clients_ids, true), "client_id");
+
+        $clients_list = DB::table("clients")
+            ->select("id", "case_no", "client_name")
+            ->whereIn("id", $ids)
+            ->get();
+
+        foreach ($clients_list as $list) {
+            if (session('role_id') == 1) {
+                $list->project_list = DB::table("projects")
+                    ->where("client_id", $list->id)
+                    ->orderBy("created_at", "desc")
+                    ->get();
+            } else {
+
+                $list->project_list = DB::table("projects")->join('projects_assignee', 'projects_assignee.projects_id', 'projects.id')
+                    ->where("projects.client_id", $list->id)
+                    ->where('projects_assignee.staff_id', session('staff_id'))
+                    ->orderBy("projects.created_at", "desc")
+                    ->get();
+            }
+        }
+        return view("pages.task.client_project_list", compact("clients_list"));
+    }
+
+    public function duplicate_template(Request $request)
+    {
+        try {
+            log::info("Duplicate template tasks to task table");
+            $project_id = $request->project_id;
+            $main_template_id = $request->main_template_id;
+            $created_by = session("staff_id");
+            //Template tasks list 
+            $selected_template_task = DB::table("task_template")->where('main_template_id', $main_template_id)->get();
+            if ($selected_template_task->count() == 0) {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Template Tasks Not Found",
+                ]);
+            }
+
+            $inserted = false;
+            foreach ($selected_template_task as $row) {
+
+                $task_inserted = DB::table("task")->insertGetId([
+                    "project_id" => $project_id,
+                    "task_template_id" => $row->id,
+                    "file_link" => $row->file_link,
+                    "title" => $row->title,
+                    "description" => $row->description,
+                    "type" => $row->type,
+                    "priority" => $row->priority,
+                    "assignee" => $row->assignee,
+                    "due_date" => $row->due_date,
+                    "start_date" => $row->start_date,
+                    "end_date" => $row->end_date,
+                    "duration" => $row->duration,
+                    "is_milestone" => $row->is_milestone,
+                    "assign_date" => $row->id,
+                    "status" => $row->status,
+                    "created_by" => $created_by,
+                    "created_at" => now()
+                ]);
+                $inserted = true;
+            }
+            if ($inserted) {
+                return response()->json([
+                    "status" => "success",
+                    "msg" => "Duplicate Template Tasks Successfully",
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Template Tasks Can`t be Duplicate",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+
+    public function dateDiffInDays($date1, $date2)
+    {
+        // Calculating the difference in timestamps
+        $diff = strtotime($date2) - strtotime($date1);
+        // 1 day = 24 hours
+        // 24 * 60 * 60 = 86400 seconds
+        return abs(round($diff / 86400));
+    }
+    public function task_status_list(Request $request)
+    {
+        try {
+            $data = DB::table('task_status_master')->get();
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function get_task_on_status(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                "task_status_id" => "numeric|required",
+                "staff_id" =>  "numeric|required",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $task_status_id = $request->task_status_id;
+            $staff_id = (string)$request->staff_id;
+            $data = DB::table('task')->join('task_status_master', 'task_status_master.id', 'task.status')->select('task.*', 'task_status_master.status as status_name')->where('task.status', $task_status_id)->whereJsonContains('task.assignee', $staff_id)->get();
+
+            foreach ($data as $row) {
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask     
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function get_task_status_pie(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                "month" => "numeric|required",
+                "year" => "numeric|required",
+                "staff_id" => "numeric|required",
+
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $month = $request->month;
+            $year = $request->year;
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $val = array();
+
+            $color = ['0xFF2196F3', '0xFFFFEB3B', '0xFFF44336', '0xFFB97DB1', '0xFF4CAF50', '0xFFFF9800', '0xFF9C27B0'];
+
+            $dates = $this->datesarr($month, $year);
+            $data = DB::table('task')->where(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->where('is_milestone', 'yes')
+                    ->whereIn('start_date', $dates);
+            })->orWhere(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->where('is_milestone', 'yes')
+                    ->whereIn('end_date', $dates);
+            })->count();
+
+
+
+            $data = DB::table('task')->join('task_status_master', 'task_status_master.id', 'task.status')
+                ->select(DB::raw("count(task.status) as status_sum"), 'task_status_master.status as status_name', 'task_status_master.id')
+                ->where(function ($query) use ($staff_id, $dates) {
+                    $query->whereJsonContains('task.assignee', $staff_id)
+                        ->where('task.active', 'yes')
+                        ->whereIn('task.start_date', $dates);
+                })->orWhere(function ($query) use ($staff_id, $dates) {
+                    $query->whereJsonContains('assignee', $staff_id)
+                        ->where('task.active', 'yes')
+                        ->whereIn('task.end_date', $dates);
+                })->groupBy('task.status')->get();
+
+
+
+
+
+            $i = 0;
+            foreach ($data as $row) {
+
+
+                //  $val['status']=$row->status_name;
+                //  $val['count']=$row->status_sum;
+                //  $val['color']=$color[$i];
+                $val[] = array('status' => $row->status_name, 'count' => $row->status_sum, 'color' => $color[$i], 'status_id' => $row->id);
+
+                $i++;
+            }
+            return response()->json([
+                "status" => "success",
+                "data" => $val,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function get_project_clients(Request $request)
+    {
+        try {
+            $clients_ids = DB::table("projects")->distinct()->pluck("client_id");
+
+            $clients_list = DB::table("clients")
+                ->select("id", "case_no", "client_name")
+                ->whereIn("id", $clients_ids)
+                ->get();
+
+            return response()->json([
+                "status" => "success",
+                "data" => $clients_list,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function web_assignee_list(Request $request)
+    {
+        try {
+            if (session('role_id') == 1) {
+                $role = 1;
+                $data = $this->get_staff_list();
+            } else {
+                $role = 8;
+                $data = DB::table('staff')->where('sid', session('staff_id'))->get(["sid", "name"]);
+            }
+
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+                "role" => $role
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function assignee_list(Request $request)
+    {
+        try {
+
+            $data = $this->get_staff_list();
+
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function task_type_list(Request $request)
+    {
+        try {
+            $data = DB::table('task_type')->where('status', 1)->orderBy('type')->get();
+
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function priority_list(Request $request)
+    {
+        try {
+            $data = DB::table('task_priority')->where('status', 1)->get();
+
+            return response()->json([
+                "status" => "success",
+                "data" => $data,
+            ]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+
+    public function api_test(Request $request)
+    {
+        try {
+            $file_links = [];
+            if ($request->hasFile('multi_files')) {
+                $files = $request->file('multi_files');
+                foreach ($files as $key => $file) {
+                    // $filename = strtolower($file->getClientOriginalName());
+                    // $extension = strtolower($file->getClientOriginalExtension());
+                    // $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                    // $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                    $filename = 'file_' . rand(11111, 99999) . '_' . time() . '.' . $file->getClientOriginalExtension();
+                    $foldername = 'task';
+                    $path = $foldername . '/' . $filename;
+                    Storage::disk("s3_quotations")->put($path, fopen($file->getRealPath(), 'r+'), "public");
+                    $target_file = Storage::disk("s3_quotations")->url($path);
+                    if ($target_file) {
+                        $file_links[] = $target_file;
+                    } else {
+                        Log::error("File Can't be uploaded");
+                        return response()->json([
+                            "status" => "error",
+                            "msg" => "File Can`t be uploaded",
+                        ]);
+                    }
+                }
+            }
+            return response()->json([
+                'status' => 'success',
+                'file_links' => $file_links
+            ]);
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function daily_tasks(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $start_date = date('Y-m-d');
+
+            $daily_task = DB::table('task')->where('start_date', '<=', $start_date)->where('end_date', '>=', $start_date)->whereJsonContains('assignee', $staff_id)->get();
+
+            foreach ($daily_task as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask 
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json(array('status' => 'success', 'data' => $daily_task));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+
+    public function my_tasks(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+
+
+            $my_task = DB::table('task')->whereJsonContains('assignee', $staff_id)->orderBy('start_date', 'DESC')->get();
+            foreach ($my_task as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask   
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json(array('status' => 'success', 'data' => $my_task));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_project(Request $request)
+    {
+
+        try {
+            $v = Validator::make($request->all(), [
+                "client_id" => "numeric|required",
+                "staff_id" => "numeric|required",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $client_id = $request->client_id;
+            $staff_id = $request->staff_id;
+
+
+            $data = DB::table('projects')
+                ->leftjoin('projects_assignee', 'projects_assignee.projects_id', 'projects.id')
+                ->where('projects.client_id', $client_id)
+                ->where('projects_assignee.staff_id', $staff_id)
+                ->where('projects.active', 'yes')->get(['projects.*', 'projects_assignee.staff_id']);
+
+            foreach ($data as $row) {
+                $row->status_name = DB::table('project_status_master')->where('id', $row->status_id)->value('status');
+                //project total comments
+                $total_comments = 0;
+                $comments = DB::table('project_comment')->where('project_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_project_list(Request $request)
+    {
+        try {
+            $notstatus=[5,6];       
+            $data = DB::table('projects')->where('active', 'yes')->whereNotIn('status_id',$notstatus);
+            
+            if ($request->staff_id != null || $request->staff_id != '') {
+                $role_id =  DB::table('users')->where('user_id', $request->staff_id)->value('role_id');
+                if ($role_id != 1) {
+                    $project_ids = DB::table('projects_assignee')
+                        // ->distinct() 
+                        ->where('staff_id', $request->staff_id)
+                        ->pluck('projects_id');
+                        $data = $data->whereIn('id', $project_ids);
+                }
+            }
+            $data = $data->get();
+            foreach ($data as $row) {
+                $row->status_name = DB::table('project_status_master')->where('id', $row->status_id)->value('status');
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_total_projects(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+            "month" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $month = $request->month;
+            $year = date('Y');
+            $dates = $this->datesarr($month, $year);
+
+            $total_project = DB::table('projects')
+                ->leftjoin('projects_assignee', 'projects_assignee.projects_id', 'projects.id')
+                ->where(function ($query) use ($staff_id, $dates) {
+                    $query->where('projects_assignee.staff_id', $staff_id)
+                        ->where('projects.active', 'yes')
+                        ->whereIn('start_date', $dates);
+                })->orWhere(function ($query) use ($staff_id, $dates) {
+                    $query->where('projects_assignee.staff_id', $staff_id)
+                        ->where('projects.active', 'yes')
+                        ->whereIn('end_date', $dates);
+                })->get(['projects.*', 'projects_assignee.staff_id']);
+
+            foreach ($total_project as $row) {
+                $row->status_name = DB::table('project_status_master')->where('id', $row->status_id)->value('status');
+                //project total comments
+                $total_comments = 0;
+                $comments = DB::table('project_comment')->where('project_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+            }
+
+            return response()->json(array('status' => 'success', 'total_project' => count($total_project), 'records' => $total_project));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_total_tasks(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+            "month" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $month = $request->month;
+            $year = date('Y');
+            $dates = $this->datesarr($month, $year);
+            $total_task = DB::table('task')->where(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->whereIn('start_date', $dates);
+            })->orWhere(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->whereIn('end_date', $dates);
+            })->get();
+            foreach ($total_task as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask 
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+
+
+            return response()->json(array('status' => 'success', 'total_task' => count($total_task), 'records' => $total_task));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_milestone(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $data = DB::table('task')->join('task_type', 'task_type.id', 'task.type')->select(DB::raw("count(task.type) as type_sum"), 'task_type.type as type_name', 'task_type.id as type_id')->where('task.is_milestone', 'yes')->where('task.active', 'yes')->whereJsonContains('task.assignee', $staff_id)->groupBy('task.type')->get();
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_task_on_type(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "type_id" => "numeric|required",
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $type_id = $request->type_id;
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $data = DB::table('task')->where('type', $type_id)->whereJsonContains('assignee', $staff_id)->orderBy('start_date', 'DESC')->get();
+            foreach ($data as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask  
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_project_client(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $data = DB::table('projects')->join('clients', 'clients.id', 'projects.client_id')
+                ->leftjoin('projects_assignee', 'projects_assignee.projects_id', 'projects.id')
+                ->where('projects_assignee.staff_id', $staff_id)
+                ->select('clients.id', 'clients.client_name', 'clients.case_no')
+                ->where('projects.active', 'yes')
+                ->distinct()->get();
+
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_client_task(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+
+            "client_id" => "numeric|required",
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $client_id = $request->client_id;
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $project_id = DB::table('projects')->where('client_id', $client_id)->where('active', 'yes')->pluck('id');
+            $data = DB::table('task')->whereIn('project_id', $project_id)->whereJsonContains('assignee', $staff_id)->orderBy('start_date', 'DESC')->get();
+            foreach ($data as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask  
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function save_task_comment(Request $request)
+    {
+       
+        try {
+            $tag_staff_id = $request->tag_staff_id;
+
+            $staff_id = $request->staff_id;
+            if ($request->request_from == 'web') {
+                log::info('comment call');
+                if ($tag_staff_id == null || $tag_staff_id == '') {
+                    $tag_staff_id = "[]";
+                } else {
+                    // ["1","2"]  to  [1,2]
+                    $tag_staff_id = "[" . implode(',', $tag_staff_id) . "]";
+                }
+                $staff_id = session('staff_id');
+            }
+            $task_id = $request->task_id;
+            $comment = $request->comment;
+            $datetime = date('d-M-Y h:i:s a');
+            $count = DB::table('task_comment')->where('task_id', $task_id)->where('active', 'yes')->count();
+
+            if ($count == 0) {
+                $newArray[] = array('datetime' => $datetime, 'staff_id' => $staff_id, 'tag_staff_id' => $tag_staff_id, 'comment' => $comment);
+                $insert = DB::table('task_comment')->insert(['task_id' => $task_id, 'comment' => json_encode($newArray)]);
+            } else {
+                $newArray = array('datetime' => $datetime, 'tag_staff_id' => $tag_staff_id, 'staff_id' => $staff_id, 'comment' => $comment);
+                $jsonComment = DB::table('task_comment')->where('task_id', $task_id)->where('active', 'yes')->value('comment');
+                $existingJson = json_decode($jsonComment, true);
+                $existingJson[] = $newArray;
+                $insert = DB::table('task_comment')->where('task_id', $task_id)->where('active', 'yes')->update(['comment' => json_encode($existingJson)]);
+            }
+            if ($insert) {
+                if ($tag_staff_id != '' || sizeof($tag_staff_id) > 0 || $tag_staff_id != 'null') {
+                    log::info('$tag_staff_id=' . $tag_staff_id);
+                    $tag_by = DB::table('staff')->where('sid', $staff_id)->value('name');
+                    $module = 'task';
+
+                    $this->send_push_notification($tag_by . ' has mentioned you in a comment', '', json_decode($tag_staff_id), 'inbox_outbox', $icon = '', $module);
+                }
+                return response()->json(array('status' => 'success', 'msg' => 'Comment saved successfully'));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Comment can`t be saved'));
+            }
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_task_comment(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+
+            "task_id" => "numeric|required",
+
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $task_id = $request->task_id;
+            $data = DB::table('task_comment')->where('task_id', $task_id)->where('active', 'yes')->value('comment');
+            $data = json_decode($data);
+            if (!empty($data)) {
+                foreach ($data as $row) {
+                    $row->staff_name = DB::table('staff')->where('sid', $row->staff_id)->value('name');
+                    $givenTimestamp = strtotime($row->datetime);
+                    $timeDifferenceSeconds = time() - $givenTimestamp;
+
+                    // Define time intervals
+                    $minute = 60;
+                    $hour = $minute * 60;
+                    $day = $hour * 24;
+                    $week = $day * 7;
+                    $month = $day * 30;
+                    $year = $day * 365;
+
+                    // Calculate the time difference in human-readable format
+                    if ($timeDifferenceSeconds < $minute) {
+                        $timeDifference = $timeDifferenceSeconds . ' sec ago';
+                    } elseif ($timeDifferenceSeconds < $hour) {
+                        $minutes = floor($timeDifferenceSeconds / $minute);
+                        $timeDifference = $minutes . ' min' . ($minutes > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $day) {
+                        $hours = floor($timeDifferenceSeconds / $hour);
+                        $timeDifference = $hours . ' hr' . ($hours > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $week) {
+                        $days = floor($timeDifferenceSeconds / $day);
+                        $timeDifference = $days . ' d' . ($days > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $month) {
+                        $weeks = floor($timeDifferenceSeconds / $week);
+                        $timeDifference = $weeks . ' w' . ($weeks > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $year) {
+                        $months = floor($timeDifferenceSeconds / $month);
+                        $timeDifference = $months . ' mon' . ($months > 1 ? '' : '') . ' ago';
+                    } else {
+                        $years = floor($timeDifferenceSeconds / $year);
+                        $timeDifference = $years . ' year' . ($years > 1 ? 's' : '') . ' ago';
+                    }
+                    $row->timeDifference = $timeDifference;
+                }
+            } else {
+                $data = array();
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+
+    public function get_project_task(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+
+            "project_id" => "numeric|required",
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $project_id = $request->project_id;
+            $data = DB::table('task')->where('project_id', $project_id)->whereJsonContains('assignee', $staff_id)->orderBy('start_date', 'DESC')->get();
+            foreach ($data as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask   
+
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_project_status_master(Request $request)
+    {
+        try {
+            $data = DB::table('project_status_master')->where('active', 'yes')->get(["id", "status"]);
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function save_project_comment(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+            "project_id" => "numeric|required",
+            "comment" => "required",
+
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $project_id = $request->project_id;
+            $comment = $request->comment;
+            $datetime = date('d-M-Y h:i:s a');
+            $count = DB::table('project_comment')->where('project_id', $project_id)->where('active', 'yes')->count();
+
+            if ($count == 0) {
+                $newArray[] = array('datetime' => $datetime, 'staff_id' => $staff_id, 'comment' => $comment);
+                $insert = DB::table('project_comment')->insert(['project_id' => $project_id, 'comment' => json_encode($newArray)]);
+            } else {
+                $newArray = array('datetime' => $datetime, 'staff_id' => $staff_id, 'comment' => $comment);
+                $jsonComment = DB::table('project_comment')->where('project_id', $project_id)->where('active', 'yes')->value('comment');
+                $existingJson = json_decode($jsonComment, true);
+                $existingJson[] = $newArray;
+                $insert = DB::table('project_comment')->where('project_id', $project_id)->where('active', 'yes')->update(['comment' => json_encode($existingJson)]);
+            }
+            if ($insert) {
+                return response()->json(array('status' => 'success', 'msg' => 'Comment saved successfully'));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Comment can`t be saved'));
+            }
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_project_comment(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+
+            "project_id" => "numeric|required",
+
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $project_id = $request->project_id;
+            $data = DB::table('project_comment')->where('project_id', $project_id)->where('active', 'yes')->value('comment');
+            $data = json_decode($data);
+            if (!empty($data)) {
+                foreach ($data as $row) {
+                    $row->staff_name = DB::table('staff')->where('sid', $row->staff_id)->value('name');
+                    $givenTimestamp = strtotime($row->datetime);
+                    $timeDifferenceSeconds = time() - $givenTimestamp;
+
+                    // Define time intervals
+                    $minute = 60;
+                    $hour = $minute * 60;
+                    $day = $hour * 24;
+                    $week = $day * 7;
+                    $month = $day * 30;
+                    $year = $day * 365;
+
+                    // Calculate the time difference in human-readable format
+                    if ($timeDifferenceSeconds < $minute) {
+                        $timeDifference = $timeDifferenceSeconds . ' sec ago';
+                    } elseif ($timeDifferenceSeconds < $hour) {
+                        $minutes = floor($timeDifferenceSeconds / $minute);
+                        $timeDifference = $minutes . ' min' . ($minutes > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $day) {
+                        $hours = floor($timeDifferenceSeconds / $hour);
+                        $timeDifference = $hours . ' hr' . ($hours > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $week) {
+                        $days = floor($timeDifferenceSeconds / $day);
+                        $timeDifference = $days . ' d' . ($days > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $month) {
+                        $weeks = floor($timeDifferenceSeconds / $week);
+                        $timeDifference = $weeks . ' w' . ($weeks > 1 ? '' : '') . ' ago';
+                    } elseif ($timeDifferenceSeconds < $year) {
+                        $months = floor($timeDifferenceSeconds / $month);
+                        $timeDifference = $months . ' mon' . ($months > 1 ? '' : '') . ' ago';
+                    } else {
+                        $years = floor($timeDifferenceSeconds / $year);
+                        $timeDifference = $years . ' year' . ($years > 1 ? 's' : '') . ' ago';
+                    }
+                    $row->timeDifference = $timeDifference;
+                }
+            } else {
+                $data = array();
+            }
+
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+
+    //add sub task
+    public function add_subtask(Request $request)
+    {
+        try {
+            log::info("add subtask");
+            $v = Validator::make($request->all(), [
+                "title" => "string|required",
+                "description" => "nullable",
+                "type" => "nullable",
+                "priority" => "nullable",
+                "assignee" => "nullable",
+                "start_date" => "nullable",
+                "end_date" => "nullable",
+                "due_date" => "nullable",
+                "status" => "nullable",
+                "is_milestone" => "nullable",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+
+            $project_id = $request->project_id;
+            $task_id = $request->task_id;
+            $template_id = $request->template_id;
+            $title = $request->title;
+            $description = $request->description;
+            $type = $request->type;
+            $priority = $request->priority;
+            $assignee = $request->assignee;
+            $status = $request->status;
+            $is_milestone = $request->is_milestone;
+            $file_link = null;
+            $file = $request->file;
+            if ($request->staff_id != null ||  $request->staff_id != '') {
+                $created_by = $request->staff_id;
+            } else {
+                $created_by = session("staff_id");
+            }
+
+            $assign_date = null;
+            if ($assignee != null) {
+                $assign_date = date("Y-m-d");
+            }
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+
+            if ($request->task_date != null) {
+                //split - startdate_enddate => "08/09/2023 - 22/09/2023"
+                $date = explode("-", $request->task_date);
+                $start_date = str_replace("/", "-", $date[0]);
+                $start_date = date("Y-m-d", strtotime($start_date));
+
+                $end_date = str_replace("/", "-", $date[1]);
+                $end_date = date("Y-m-d", strtotime($end_date));
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //start_date , end_date
+            if ($request->start_date != null && $request->end_date != null) {
+                $start_date = $request->start_date;
+                $end_date = $request->end_date;
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //END
+            $subtask_id = DB::table("subtask")->insertGetId([
+                "project_id" => $project_id,
+                "task_id" => $task_id,
+                "task_template_id" => $template_id,
+                "file_link" => $file_link,
+                "title" => $title,
+                "description" => $description,
+                "type" => $type,
+                "priority" => $priority,
+                "assignee" => $assignee,
+                "due_date" => $due_date,
+                "start_date" => $start_date,
+                "end_date" => $end_date,
+                "duration" => $duration,
+                "is_milestone" => $is_milestone,
+                "assign_date" => $assign_date,
+                "status" => $status,
+                "created_by" => $created_by,
+                "created_at" => now(),
+            ]);
+
+             if ($subtask_id) {
+                $task_logs = DB::table("task_logs")->insert([
+                    "task_id" => $task_id,
+                    "project_id" => $project_id,
+                    "sub_task_id"=>$subtask_id,
+                    "task_template_id" => $template_id,
+                    "file_link" => $file_link,
+                    "title" => $title,
+                    "description" => $description,
+                    "type" => $type,
+                    "priority" => $priority,
+                    "assignee" => json_encode($assignee),
+                    "due_date" => $due_date,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "duration" => $duration,
+                    "is_milestone" => $is_milestone,
+                    "assign_date" => $assign_date,
+                    "status" => $status,
+                    "created_by" => $created_by,
+                    "updated_at" => now(),
+                ]);
+                return json_encode([
+                    "status" => "success",
+                    "msg" => "SubTask Created successfully",
+                ]);
+            } else {
+                return json_encode([
+                    "status" => "error",
+                    "msg" => "SubTask Can`t be Created",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+
+    public function update_subtask(Request $request)
+    {
+        try {
+            log::info("update sub task");
+
+            $start_date = null;
+            $end_date = null;
+            $due_date = null;
+            $duration = null;
+            log::info('update subtask id=' . $request->id);
+            if ($request->staff_id != null ||  $request->staff_id != '') {
+                $updated_by = $request->staff_id;
+            } else {
+                $updated_by = session("staff_id");
+            }
+
+
+            //assignee change then assign date update
+            $task_assignee_data = DB::table("task")
+                ->where("id", $request->id)
+                ->first(["assignee", "assign_date"]);
+            $assign_date = $task_assignee_data->assign_date;
+            if ($task_assignee_data->assignee != $request->assignee) {
+                $assign_date = date("Y-m-d");
+            }
+            if ($request->wantsJson()) {
+                $start_date = $request->start_Date;
+                $end_date = $request->end_date;
+            } else {
+                if ($request->task_date != null) {
+                    //split - startdate_enddate => "08/09/2023 - 22/09/2023"
+                    $date = explode("-", $request->task_date);
+                    $start_date = str_replace("/", "-", $date[0]);
+                    $start_date = date("Y-m-d", strtotime($start_date));
+
+                    $end_date = str_replace("/", "-", $date[1]);
+                    $end_date = date("Y-m-d", strtotime($end_date));
+
+                    // date count days
+                    if ($start_date != null && $end_date != null) {
+                        $duration =
+                            $this->dateDiffInDays($start_date, $end_date) . " Days";
+                    }
+                }
+            }
+
+
+            $file_link = $request->file_link;
+            $file = $request->file;
+
+            if ($request->hasFile("file")) {
+                $filename = strtolower($file->getClientOriginalName());
+                $extension = strtolower($file->getClientOriginalExtension());
+                $file_name = pathinfo($filename, PATHINFO_FILENAME);
+                $file_name = $file_name . "-" . strtotime(date("Y-m-d H:i:s")) . "." . $extension;
+                $foldername = 'task';
+                $path = $foldername . '/' . $file_name;
+                Storage::disk("s3_quotations")->put($path, fopen($request->file('file'), 'r+'), "public");
+                $target_file = Storage::disk("s3_quotations")->url($path);
+
+                if ($target_file) {
+                    $file_link = $target_file;
+                } else {
+                    Log::error("File Can't be uploaded");
+                    return response()->json([
+                        "status" => "error",
+                        "msg" => "File Can`t be uploaded",
+                    ]);
+                }
+            }
+
+            //start_date , end_date
+            if ($request->start_date != null && $request->end_date != null) {
+                $start_date = $request->start_date;
+                $end_date = $request->end_date;
+
+                // date count days
+                if ($start_date != null && $end_date != null) {
+                    $duration =
+                        $this->dateDiffInDays($start_date, $end_date) . " Days";
+                }
+            }
+            //END
+
+            $update = DB::table("subtask")
+                ->where("id", $request->id)
+                ->update([
+                    "task_id" => $request->task_id,
+                    "title" => $request->title,
+                    "project_id" => $request->project_id,
+                    "task_template_id" => $request->template_id,
+                    "file_link" => $file_link,
+                    "description" => $request->description,
+                    "type" => $request->type,
+                    "priority" => $request->priority,
+                    "assignee" => $request->assignee,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "due_date" => $due_date,
+                    "duration" => $duration,
+                    "is_milestone" => $request->is_milestone,
+                    "status" => $request->status,
+                    "assign_date" => $assign_date,
+                    "updated_by" => $updated_by,
+                    "updated_at" => now(),
+                ]);
+            if ($update) {
+                //Task logs
+                $task_logs = DB::table("task_logs")->insert([
+                    "task_id" => $request->task_id,
+                    "project_id" => $request->project_id,
+                    "sub_task_id" =>$request->id,
+                    "task_template_id" => $request->template_id,
+                    "file_link" => $file_link,
+                    "title" => $request->title,
+                    "description" => $request->description,
+                    "type" => $request->type,
+                    "priority" => $request->priority,
+                    "assignee" => $request->assignee,
+                    "due_date" => $due_date,
+                    "start_date" => $start_date,
+                    "end_date" => $end_date,
+                    "duration" => $duration,
+                    "is_milestone" => $request->is_milestone,
+                    "assign_date" => $assign_date,
+                    "status" => $request->status,
+                    "updated_by" => $updated_by,
+                    "created_at" => now(),
+                ]);
+
+                return response()->json([
+                    "status" => "success",
+                    "msg" => "Sub Task Updated successfully",
+                ]);
+            } else {
+                return response()->json([
+                    "status" => "error",
+                    "msg" => "Sub Task Can`t be Updated",
+                ]);
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    public function task_comment_inbox(Request $request)
+    {
+        if ($request->request_from != 'web') {
+            $v = Validator::make($request->all(), [
+                "staff_id" => "numeric|required",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+        }
+
+        try {
+            $staff_id = $request->staff_id;
+            if ($request->request_from == 'web') {
+                $staff_id = session('staff_id');
+            }
+            $data = DB::table('task_comment')->whereYear('created_at', date('Y'))->where('active', 'yes')->get();
+
+            $inboxDataArr = [];
+            if (!empty($data)) {
+                foreach ($data as $row) {
+                    // task detail
+                    $row->task_id = DB::table('task')->where('id', $row->task_id)->value('id');
+                    $row->task_title = DB::table('task')->where('id', $row->task_id)->value('title');
+                    //end task detail
+
+                    $dataComment = json_decode($row->comment);
+                    foreach ($dataComment as $row2) {
+                        //tag staffIds
+                        if ($row2->tag_staff_id != null) {
+                            $tagStaffId =  json_decode($row2->tag_staff_id);
+                            $tagname = DB::table('staff')->whereIn('sid', $tagStaffId)->pluck('name');
+
+                            if (in_array($staff_id, $tagStaffId)) {
+                                // staff_id - sended_by
+                                // $sended_by = DB::table('staff')->where('sid', $row2->staff_id)->value('name');
+                                $sended_by = DB::table('staff')->where('sid', $row2->staff_id)->value('short_name');
+                                //datetime format- 20 Feb at 11.30 AM
+                                $db_datetime = $row2->datetime;
+                                $date = date('d M', strtotime($row2->datetime));
+                                $time = date('h:i A', strtotime($row2->datetime));
+                                $datetime = $date . " at " . $time;
+                                $comment = $row2->comment;
+                                $fields = [
+                                    "task.id",
+                                    "task.project_id",
+                                    "task.title",
+                                    "task.description",
+                                    "task.type",
+                                    "task.file_link",
+                                    "task.priority",
+                                    "task.assignee",
+                                    "task.due_date",
+                                    "task.start_date",
+                                    "task.end_date",
+                                    "task.is_milestone",
+                                    "task.status",
+                                    "task.office_id",
+                                    "task.working_hr",
+                                    "task.time",
+                                    "task.view",
+                                    "task.created_at",
+                                    "projects.project_name",
+                                    "projects.start_date as project_start_date",
+                                    "projects.end_date  as project_end_date",
+                                    "projects.service_id as poject_service_id",
+                                    "projects.created_at as poject_created_at",
+                                    "task_status_master.status as task_status",
+                                ];
+                                if (session('role_id') != 1) {
+                                    $staff_id = (string)session('staff_id');
+                                } else {
+                                    $staff_id = '';
+                                }
+                                
+                                $task_list = DB::table("task")
+                                    ->leftjoin("projects", "projects.id", "task.project_id")
+                                    ->leftjoin(
+                                        "task_status_master",
+                                        "task_status_master.id",
+                                        "task.status"
+                                    )->where('task.id',$row->task_id)->get($fields);
+                    
+                                foreach ($task_list as $row3) {
+                                    if ($row3->assignee != null) {
+                                        $assignee = json_decode($row3->assignee);
+                                        $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                                        $row3->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                                    }
+                                     else
+                                        {
+                                            $row3->assignee_name='';
+                                        }
+                                    $row3->priority_name = DB::table('task_priority')->where('id', $row3->priority)->value('priority');
+                                    $row3->type_name = DB::table('task_type')->where('id', $row3->type)->value('type');
+                                    $row3->status_name = DB::table('task_status_master')->where('id', $row3->status)->value('status');
+                    
+                                    //office 
+                                    $row3->dept_name = DB::table('dept_address')->where('id', $row3->office_id)->value('department_name');
+                                    $row3->dept_address = DB::table('dept_address')->where('id', $row3->office_id)->value('address');
+                                    $row3->dept_geolocation = DB::table('dept_address')->where('id', $row3->office_id)->value('geolocation');
+                                    if($row3->dept_geolocation == '["\"\"","\"\""]'){
+                                        $row3->dept_geolocation = null;
+                                    }
+                                    $row3->lat_long = null;
+                                    if($row3->dept_geolocation != null){
+                                       
+                                        $lat_long = json_decode($row3->dept_geolocation,true);
+                                        $row3->lat_long = $lat_long[1].",".$lat_long[0];
+                                    }
+                                    //Total Working Hr
+                                    $total_working_hr = 0;
+                                    if($row3->working_hr != null){
+                                      $total_working_hr =  $this->totalWorkingHr($row3->working_hr);
+                                    }
+                                    $row3->total_working_hr = $total_working_hr ." Hr";
+                                }
+                                $inboxDataArr[] = [
+                                    'task_id' => $row->task_id,
+                                    'task_title' => $row->task_title,
+                                    'comment' => $comment,
+                                    'datetime' => $datetime,
+                                    'sended_by' => $sended_by,
+                                    'tag_staff_id' => $tagStaffId,
+                                    'tagname' => $tagname,
+                                    'db_datetime' => $db_datetime,
+                                    'task_list'  =>$task_list,
+                                ];
+                            }
+                        }
+                      
+                        
+                    }
+                }
+            }
+           
+            //order logic
+            usort($inboxDataArr, function ($a, $b) {
+                $dateA = strtotime($a['db_datetime']);
+                $dateB = strtotime($b['db_datetime']);
+                return $dateB - $dateA; // Descending order
+                // return $dateA - $dateB; // asc order
+            });
+         
+            if ($request->request_from == 'web') {
+                return response()->json([
+                    'body' => view("pages.task.get_inbox", compact("inboxDataArr"))->render(),
+                    'status' => 'success',
+
+                ]);
+            } else {
+                return response()->json(array('status' => 'success', 'data' => $inboxDataArr));
+            }
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+
+    public function task_comment_outbox(Request $request)
+    {
+        if ($request->request_from != 'web') {
+            $v = Validator::make($request->all(), [
+                "staff_id" => "numeric|required",
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+        }
+
+        try {
+            $staff_id = $request->staff_id;
+            if ($request->request_from == 'web') {
+                $staff_id = session('staff_id');
+            }
+            $data = DB::table('task_comment')->whereYear('created_at', date('Y'))->where('active', 'yes')->get();
+
+            $inboxDataArr = [];
+            if (!empty($data)) {
+                foreach ($data as $row) {
+                    // task detail
+                    $row->task_id = DB::table('task')->where('id', $row->task_id)->value('id');
+                    $row->task_title = DB::table('task')->where('id', $row->task_id)->value('title');
+                    //end task detail
+
+                    $dataComment = json_decode($row->comment);
+                    foreach ($dataComment as $row2) {
+                        //tag staffIds
+                        if ($row2->tag_staff_id != null) {
+                            $tagStaffId =  json_decode($row2->tag_staff_id);
+                            $tagname = DB::table('staff')->whereIn('sid', $tagStaffId)->pluck('name');
+                            //comments created - staff_id  
+                            if ($row2->staff_id == $staff_id) {
+                                // staff_id - sended_by
+                                $sended_by = DB::table('staff')->where('sid', $row2->staff_id)->value('name');
+                                //datetime format- 20 Feb at 11.30 AM
+                                $db_datetime = $row2->datetime;
+                                $date = date('d M', strtotime($row2->datetime));
+                                $time = date('h:i A', strtotime($row2->datetime));
+                                $datetime = $date . " at " . $time;
+                                $comment = $row2->comment;
+                                $fields = [
+                                    "task.id",
+                                    "task.project_id",
+                                    "task.title",
+                                    "task.description",
+                                    "task.type",
+                                    "task.file_link",
+                                    "task.priority",
+                                    "task.assignee",
+                                    "task.due_date",
+                                    "task.start_date",
+                                    "task.end_date",
+                                    "task.is_milestone",
+                                    "task.status",
+                                    "task.office_id",
+                                    "task.working_hr",
+                                    "task.time",
+                                    "task.view",
+                                    "task.created_at",
+                                    "projects.project_name",
+                                    "projects.start_date as project_start_date",
+                                    "projects.end_date  as project_end_date",
+                                    "projects.service_id as poject_service_id",
+                                    "projects.created_at as poject_created_at",
+                                    "task_status_master.status as task_status",
+                                ];
+                                if (session('role_id') != 1) {
+                                    $staff_id = (string)session('staff_id');
+                                } else {
+                                    $staff_id = '';
+                                }
+                                
+                                $task_list = DB::table("task")
+                                    ->leftjoin("projects", "projects.id", "task.project_id")
+                                    ->leftjoin(
+                                        "task_status_master",
+                                        "task_status_master.id",
+                                        "task.status"
+                                    )->where('task.id',$row->task_id)->get($fields);
+                    
+                                foreach ($task_list as $row3) {
+                                    if ($row3->assignee != null) {
+                                        $assignee = json_decode($row3->assignee);
+                                        $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                                        $row3->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                                    }
+                                     else
+                                        {
+                                            $row3->assignee_name='';
+                                        }
+                                    $row3->priority_name = DB::table('task_priority')->where('id', $row3->priority)->value('priority');
+                                    $row3->type_name = DB::table('task_type')->where('id', $row3->type)->value('type');
+                                    $row3->status_name = DB::table('task_status_master')->where('id', $row3->status)->value('status');
+                    
+                                    //office 
+                                    $row3->dept_name = DB::table('dept_address')->where('id', $row3->office_id)->value('department_name');
+                                    $row3->dept_address = DB::table('dept_address')->where('id', $row3->office_id)->value('address');
+                                    $row3->dept_geolocation = DB::table('dept_address')->where('id', $row3->office_id)->value('geolocation');
+                                    if($row3->dept_geolocation == '["\"\"","\"\""]'){
+                                        $row3->dept_geolocation = null;
+                                    }
+                                    $row3->lat_long = null;
+                                    if($row3->dept_geolocation != null){
+                                       
+                                        $lat_long = json_decode($row3->dept_geolocation,true);
+                                        $row3->lat_long = $lat_long[1].",".$lat_long[0];
+                                    }
+                                    //Total Working Hr
+                                    $total_working_hr = 0;
+                                    if($row3->working_hr != null){
+                                      $total_working_hr =  $this->totalWorkingHr($row3->working_hr);
+                                    }
+                                    $row3->total_working_hr = $total_working_hr ." Hr";
+                                }
+                                $inboxDataArr[] = [
+                                    'task_id' => $row->task_id,
+                                    'task_title' => $row->task_title,
+                                    'comment' => $comment,
+                                    'datetime' => $datetime,
+                                    'sended_by' => $sended_by,
+                                    'tag_staff_id' => $tagStaffId,
+                                    'tagname' => $tagname,
+                                    'db_datetime' => $db_datetime,
+                                    'task_list'  =>$task_list,
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+            //order logic
+            usort($inboxDataArr, function ($a, $b) {
+                $dateA = strtotime($a['db_datetime']);
+                $dateB = strtotime($b['db_datetime']);
+                return $dateB - $dateA; // Descending order
+                // return $dateA - $dateB; // asc order
+            });
+            if ($request->request_from == 'web') {
+                return response()->json([
+                    'body' => view("pages.task.get_outbox", compact("inboxDataArr"))->render(),
+                    'status' => 'success',
+
+                ]);
+            } else {
+                return response()->json(array('status' => 'success', 'data' => $inboxDataArr));
+            }
+        } catch (\Exception $e) {
+            $errorMessage = $e->getMessage();
+            return response()->json(array('status' => 'error', 'msg' => $errorMessage));
+        }
+    }
+    public function get_total_milestone(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                "month" => "numeric|required",
+                "staff_id" => "numeric|required",
+
+            ]);
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $month = $request->month;
+            $year = date('Y');
+            $staff_id = $request->staff_id;
+            $staff_id = (string)$staff_id;
+            $dates = $this->datesarr($month, $year);
+            $data = DB::table('task')->where(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->where('is_milestone', 'yes')
+                    ->whereIn('start_date', $dates);
+            })->orWhere(function ($query) use ($staff_id, $dates) {
+                $query->whereJsonContains('assignee', $staff_id)
+                    ->where('active', 'yes')
+                    ->where('is_milestone', 'yes')
+                    ->whereIn('end_date', $dates);
+            })->get();
+
+            foreach ($data as $row) {
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                $row->project_name = DB::table('projects')->where('id', $row->project_id)->value('project_name');
+                if($row->project_id != '' || $row->project_id != null){
+                      $projectArr = $this->get_project_status($row->project_id);
+                      $row->project_status_id =   $projectArr['project_status_id'];
+                      $row->project_status =   $projectArr['project_status'];
+                }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                if ($row->end_date == '' || $row->end_date == null) {
+                    $row->delay = 0;
+                } else {
+                    $diff = strtotime(date('Y-m-d')) - strtotime($row->end_date);
+                    $del = round($diff / 86400);
+                    if ($del < 0) {
+                        $row->delay = 0;
+                    } else {
+                        $row->delay = $del . ' D';
+                    }
+                }
+                //multi files
+                $row->multi_file_links = DB::table('task_multi_file_links')
+                    ->where('task_id', $row->id)->get();
+                //multi files
+                //subtask list
+                $row->subtask_list = DB::table('subtask')
+                    ->leftjoin("task", "task.id", "subtask.task_id")
+                    ->leftjoin("staff", "staff.sid", "subtask.assignee")
+                    ->leftjoin("task_status_master", "task_status_master.id", "subtask.status")
+                    ->where('task_id', $row->id)->get(['subtask.*', 'task.title as task_title', 'staff.name', "task_status_master.status as status_name"]);
+                foreach ($row->subtask_list as $row1) {
+                    $row1->project_name = DB::table('projects')->where('id', $row1->project_id)->value('project_name');
+                    $row1->priority_name = DB::table('task_priority')->where('id', $row1->priority)->value('priority');
+                    $row1->type_name = DB::table('task_type')->where('id', $row1->type)->value('type');
+                }
+                //end subtask 
+                //task total comments
+                $total_comments = 0;
+                $comments = DB::table('task_comment')->where('task_id', $row->id)->where('active', 'yes')->value('comment');
+                $comments = json_decode($comments);
+
+                if ($comments != null) {
+                    $total_comments =  count($comments);
+                }
+                $row->total_comments = $total_comments;
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+
+
+
+            return response()->json(array('status' => 'success', 'data' => count($data), 'records' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function comment_inbox(Request $request)
+    {
+        try {
+
+            return view(
+                "pages.task.comment_inbox"
+
+            );
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function get_notifications(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = (string)$request->staff_id;
+            $data = DB::table('notification')->whereJsonContains('staff_id', $staff_id)->whereYear('created_at', date('Y'))->orderBy('id', 'desc')->get();
+            if (!empty($data)) {
+                foreach ($data as $row) {
+                    //date format 
+                    $date = date('d M', strtotime($row->created_at));
+                    $time = date('h:i A', strtotime($row->created_at));
+                    $row->created_at = $date . " at " . $time;
+                }
+            }
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function inbox(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        return view(
+            "pages.task.inbox",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+
+    public function outbox(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        return view(
+            "pages.task.outbox",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+    public function task_hearing(Request $request)
+    {
+
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        return view(
+            "pages.task.task_hearing",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+
+    public function get_chart_task_type(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "staff_id" => "numeric|required",
+            "month" => "numeric|required",
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $staff_id = $request->staff_id;
+            $month = $request->month;
+            $year = date('Y');
+            $staff_id = (string)$staff_id;
+            $dates = $this->datesarr($month, $year);
+            $data = DB::table('task')->join('task_type', 'task_type.id', 'task.type')
+                ->select(DB::raw("count(task.type) as type_sum"), 'task_type.type as type_name', 'task_type.id as type_id')
+                ->where(function ($query) use ($staff_id, $dates) {
+                    $query->whereJsonContains('task.assignee', $staff_id)
+                        ->where('task.active', 'yes')
+                        ->whereIn('task.start_date', $dates);
+                })->orWhere(function ($query) use ($staff_id, $dates) {
+                    $query->whereJsonContains('task.assignee', $staff_id)
+                        ->where('task.active', 'yes')
+                        ->whereIn('task.end_date', $dates);
+                })->groupBy('task.type')->get();
+
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function get_mention_assignee(Request $request)
+    {
+        try {
+            $project_id = $request->project_id;
+            $sugg = $request->searchTerm;
+            log::info('sugge=' . $sugg);
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->join('role', 'role.id', 'users.role_id')
+                ->where('users.status', 'active')
+                ->where('staff.name', 'like', '%' . $sugg . '%')
+                ->select('staff.sid', 'staff.name')
+                ->orderBy('staff.name', 'ASC')
+                ->get();
+            $out = '';
+            foreach ($staff as $row) {
+                $out .= '<li id="' . $row->sid . '">' . $row->name . '</li>';
+            }
+            return $out;
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+
+    public function get_hearing_task(Request $request)
+    {
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            $task_filter_status = $request->task_filter_status;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            $hearing_id = 4;
+            $hearing_filter_from_date = $request->hearing_filter_from_date;
+            $hearing_filter_to_date = $request->hearing_filter_to_date;
+            log::info($hearing_filter_from_date . '-' . $hearing_filter_to_date);
+
+          
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                )->where(function ($query) use ($hearing_id, $task_filter_status, $hearing_filter_from_date, $hearing_filter_to_date) {
+                    // if ($staff_id != '') {
+                    //     $query->whereJsonContains('task.assignee', $staff_id);
+                    // }
+                    $query->where('task.type', $hearing_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($hearing_filter_from_date != '') {
+                        $hearing_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_from_date)));
+                        $query->where('task.start_date', '>=', $hearing_filter_from_date);
+                    }
+                    if ($hearing_filter_to_date != '') {
+                        $hearing_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_to_date)));
+                        $query->where('task.start_date', '<=', $hearing_filter_to_date);
+                    }
+                })->orWhere(function ($query) use ($hearing_id, $task_filter_status, $hearing_filter_from_date, $hearing_filter_to_date) {
+                    // if ($staff_id != '') {
+                    //     $query->whereJsonContains('task.assignee', $staff_id);
+                    // }
+                    $query->where('task.type', $hearing_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($hearing_filter_from_date != '') {
+                        $hearing_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_from_date)));
+                        $query->where('task.end_date', '>=', $hearing_filter_from_date);
+                    }
+                    if ($hearing_filter_to_date != '') {
+                        $hearing_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_to_date)));
+                        $query->where('task.end_date', '<=', $hearing_filter_to_date);
+                    }
+                })->orderBy('task.start_date')->get($fields);
+
+            foreach ($task_list as $row) {
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    // $staff_name = DB::table('staff')->where('sid', $assignee)->pluck('name');
+                    $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                }
+                   else
+                    {
+                        $row->assignee_name='';
+                    }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+            return view(
+                "pages.task.get_hearing",
+                compact('task_list')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function get_project_status($project_id)
+    {
+        try {
+           
+            $project_status_id = DB::table('projects')
+                ->where('id', $project_id)
+                ->value('status_id');
+            $project_status = DB::table('project_status_master')
+                ->where('id', $project_status_id)
+                ->value('status');
+             return ['project_status_id'=>$project_status_id,'project_status'=>$project_status];   
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function getprojectstatus(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            "project_id" => "numeric|required"
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $project_status_id = DB::table('projects')
+                ->where('id', $request->project_id)
+                ->value('status_id');
+            $project_status = DB::table('project_status_master')
+                ->where('id', $project_status_id)
+                ->value('status');
+             $res =  ['project_status_id'=>$project_status_id,'project_status'=>$project_status];   
+             return response()->json(array('status' => 'success', 'data' => $res));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function generate_short_name(Request $request)
+    {
+          try {
+        $fullNames =  DB::table('staff')
+                       ->get(['sid','name']);
+         $arr = [];               
+        foreach ($fullNames as $row) {
+            $staff_name = $row->name;
+            if (strpos($staff_name, "Mr. ") === 0) {
+             $staff_name = substr($staff_name, 4);
+            }
+           $nameParts = explode(' ', $staff_name);
+           $firstName = $middleName = $lastName = '';
+          if (!empty($nameParts)) {
+
+            $firstName = $nameParts[0]; 
+
+            if(count($nameParts) == 3){
+                $middleName = $nameParts[1];
+                $lastName = $nameParts[2];
+            }else if(count($nameParts) == 2){
+                $lastName = $nameParts[1];
+                $middleName ='';
+            }else{
+
+            }  
+
+            }
+            $f = $m = $l ='';  
+            if(!empty($firstName)){
+              $f =  ucfirst($firstName);
+            }
+            //  if(!empty($middleName)){
+            //   $m =  ucfirst(substr($middleName, 0, 1));
+            // }
+             if(!empty($lastName)){
+               $l =  ucfirst(substr($lastName, 0, 1));
+            }
+
+           $short_name =  $f .''.$l;
+
+            DB::table("staff")
+                ->where("sid", $row->sid)
+                ->update(['short_name'=>$short_name]);
+         
+          $arr[] =  [
+            'full_name' => $firstName .' '. $middleName.' '.$lastName,
+            'short_name' => $short_name
+          ];
+        }
+        return response()->json(array('status' => 'success', 'data' => $arr));
+          } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["error" => "Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["error" => "Error"]);
+        }
+    }
+    public function totalWorkingHr($jsonString)
+    {
+        // $jsonString = '[{"01-05-2024":"3"},{"03-05-2024":"8"},{"04-05-2024":"9"}]';
+        $data = json_decode($jsonString, true);
+        $total_hr = 0;
+        foreach ($data as $item) {
+          $hr_val = $item[key($item)]; 
+          $total_hr = $total_hr + $hr_val;
+        }
+        return $total_hr;
+    }
+   public function overdue_task(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->where('id','!=',5)->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        return view(
+            "pages.task.overdue_task",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+    public function overdue_task_grid(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->where('id','!=',5)->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+      
+           
+        
+        return view(
+            "pages.task.overdue_task_grid",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list",
+              
+            )
+
+        );
+    }
+    public function get_overdue_grid_task(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->where('id','!=',5)->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+       
+        $fields = [
+            "task.id",
+            "task.project_id",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.file_link",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.time",
+            "task.view",
+            "task.created_at",
+            "projects.project_name",
+            "projects.start_date as project_start_date",
+            "projects.end_date  as project_end_date",
+            "projects.service_id as poject_service_id",
+            "projects.created_at as poject_created_at",
+            "task_status_master.status as task_status",
+        ];
+        $today=date('Y-m-d');
+       
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                );
+            $status_arr=array(3,4,5,7);
+            $task_list = $task_list->where('task.end_date','<',$today)->whereNotIn('task.status',$status_arr)->orderBy('end_date','desc');
+            $project_ids=DB::table('projects')->leftjoin("projects_assignee","projects_assignee.projects_id","projects.id")->whereNotIn('projects.status_id',[5,6])->where('projects_assignee.staff_id', $staff_id)->pluck('projects.id');
+             if (session('role_id') == 1) {
+                  $task_list = $task_list->get($fields);
+                } else {
+                     $staff_id=(string)session('staff_id');
+                     $task_list = $task_list->whereJsonContains('task.assignee', $staff_id)->get($fields);
+                }
+            
+         
+
+            foreach ($task_list as $row) {
+                $row->raise_count=DB::table('task_overdue_raise')->where('task_id',$row->id)->count();
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_name)), ',');
+                } else {
+                    $row->assignee_name = '';
+                }
+                $row->overdue_days=  $this->dateDiffInDays($row->end_date,date('Y-m-d'));
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+
+        
+        return view(
+            "pages.task.get_overdue_task_grid",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list",
+                "task_list"
+            )
+
+        );
+    }
+    public function get_over_due_task(Request $request)
+    {
+       
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            if(session('role_if')==1)
+            {
+                $staff = $this->get_staff_list();
+            }
+            else
+            {
+                $staff=$this->get_staff_id_list_userid_company(session('staff_id'));
+            }
+            
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            $today=date('Y-m-d');
+            foreach ($staff as $sid) {
+                $staff_id = $sid->sid;
+                $staff_id = (string)$staff_id;
+                $task_list = DB::table("task")
+                    ->leftjoin("projects", "projects.id", "task.project_id")
+                    ->leftjoin(
+                        "task_status_master",
+                        "task_status_master.id",
+                        "task.status"
+                    );
+                    $status_arr=array(3,4,5,7);
+                
+                
+                if (session('role_id')== 1) {
+                    $task_list = $task_list->whereJsonContains('task.assignee', $staff_id)->where('task.end_date','<',$today)->whereNotIn('task.status',$status_arr)->get($fields);
+                }
+                else
+                {
+                    $staff_id = session('staff_id');
+                    $project_ids=DB::table('projects')->leftjoin("projects_assignee","projects_assignee.projects_id","projects.id")->whereNotIn('projects.status_id',[5,6])->where('projects_assignee.staff_id', $staff_id)->pluck('projects.id');
+                    $staff_id = (string)$staff_id;
+                     $task_list = $task_list->where(function ($query) use ($project_ids,$status_arr,$today) {
+                        $query->where('task.end_date','<',$today);
+                        $query->whereNotIn('task.status',$status_arr);
+                        $query->whereIn('task.project_id',$project_ids);
+                         })->orWhere(function ($query) use ($project_ids,$status_arr,$today) {
+                        $query->where('task.end_date','<',$today);
+                        $query->whereNotIn('task.status',$status_arr);
+                        $query->whereNull('task.project_id');
+                        $query->whereJsonContains('task.assignee', (string)session('staff_id'));
+                         })->get($fields);
+                }
+                
+                foreach ($task_list as $row) 
+                {
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                    //office 
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->overdue_days=  $this->dateDiffInDays($row->end_date,date('Y-m-d')) . " Days";
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+                $sid->task = $task_list;
+            }
+
+
+            return view(
+                "pages.task.get_over_due_task",
+                compact('staff')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+    public function overdue_task_filter(Request $request)
+    {
+        try {
+
+            Log::info("inside task_filter");
+            $task_filter_type = $request->task_filter_type;
+            $task_filter_status = $request->task_filter_status;
+            $task_filter_priority = $request->task_filter_priority;
+            $task_filter_from_date = $request->task_filter_from_date;
+            $task_filter_to_date = $request->task_filter_to_date;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at"
+
+            ];
+            $staff = $this->get_staff_list();
+            $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+            $task_status_master = DB::table("task_status_master")->get(["id", "status"]);
+            $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+
+            $status_arr=array(3,4,5,7);
+
+            foreach ($staff as $sid) {
+                $staff_id = $sid->sid;
+                $staff_id = (string)$staff_id;
+                $task_list = DB::table("task")
+                    ->leftjoin("projects", "projects.id", "task.project_id");
+
+                $task_list = $task_list->where(function ($query) use ($staff_id, $task_filter_type, $task_filter_status, $task_filter_priority, $task_filter_from_date, $task_filter_to_date) {
+                    $query->whereJsonContains('task.assignee', $staff_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status',$task_filter_status);
+                    }
+                    if ($task_filter_type != '') {
+                        $query->whereIn('type', $task_filter_type);
+                    }
+                    if ($task_filter_priority != '') {
+                        $query->whereIn('priority', $task_filter_priority);
+                    }
+                    if ($task_filter_from_date != '') {
+                        $task_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_from_date)));
+                        $query->where('task.start_date', '>=', $task_filter_from_date);
+                    }
+                    if ($task_filter_to_date != '') {
+                        $task_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_to_date)));
+                        $query->where('task.start_date', '<=', $task_filter_to_date);
+                    }
+                    else
+                    {
+                        $today=date('Y-m-d');
+                        $query->where('task.end_date','<',$today);
+                    }
+                    $query->whereNotIn('task.status',$status_arr);
+                })->orWhere(function ($query) use ($staff_id, $task_filter_type, $task_filter_status, $task_filter_priority, $task_filter_from_date, $task_filter_to_date) {
+                    $query->whereJsonContains('task.assignee', $staff_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                   if ($task_filter_type != '') {
+                        $query->whereIn('type', $task_filter_type);
+                    }
+                    if ($task_filter_priority != '') {
+                        $query->whereIn('priority', $task_filter_priority);
+                    }
+                    if ($task_filter_from_date != '') {
+                        $task_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_from_date)));
+                        $query->where('task.end_date', '>=', $task_filter_from_date);
+                    }
+                    if ($task_filter_to_date != '') {
+                        $task_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $task_filter_to_date)));
+                        $query->where('task.end_date', '<=', $task_filter_to_date);
+                    }
+                    else
+                    {
+                        $today=date('Y-m-d');
+                        $query->where('task.end_date','<',$today);
+                    }
+                    $query->whereNotIn('task.status',$status_arr);
+
+                });
+               
+               
+                $task_list = $task_list->get($fields);
+                foreach ($task_list as $row) {
+                    
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    $row->overdue_days=  $this->dateDiffInDays($row->end_date,date('Y-m-d')) . " Days";
+                    if ($row->assignee != null) {
+                        $assignee = json_decode($row->assignee);
+                        $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                        $row->assignee_name = rtrim(implode(',', json_decode($staff_name)), ',');
+                    } else {
+                        $row->assignee_name = '';
+                    }
+                     
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+                $sid->task = $task_list;
+            }
+
+
+
+
+
+            return view(
+                "pages.task.get_over_due_task",
+                compact(
+                    'staff',
+                    'task_type',
+                    'task_priority',
+                    'task_status_master'
+                )
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+
+
+    public function task_hearing_excel(Request $request)
+    {
+       
+       
+        Log::info("inside task_list");
+        $search = $request->search_task;
+        $task_filter_status = $request->task_filter_status;
+        $fields = [
+            "task.id",
+            "task.project_id",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.file_link",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.time",
+            "task.view",
+            "task.created_at",
+            "projects.project_name",
+            "projects.start_date as project_start_date",
+            "projects.end_date  as project_end_date",
+            "projects.service_id as poject_service_id",
+            "projects.created_at as poject_created_at",
+            "task_status_master.status as task_status",
+        ];
+        $hearing_id = 4;
+        $hearing_filter_from_date = $request->hearing_filter_from_date;
+        $hearing_filter_to_date = $request->hearing_filter_to_date;
+        log::info($hearing_filter_from_date . '-' . $hearing_filter_to_date);
+
+        
+
+        $task_list = DB::table("task")
+            ->leftjoin("projects", "projects.id", "task.project_id")
+            ->leftjoin(
+                "task_status_master",
+                "task_status_master.id",
+                "task.status"
+            );
+             if (session('role_id')!= 1) {
+            $staff_id = (string)session('staff_id');
+           $task_list=$task_list->whereJsonContains('task.assignee', $staff_id);
+             }
+           $task_list=$task_list->where('task.type', $hearing_id)->orderBy('task.start_date')->get($fields);
+            $out1 = '';
+            $export_data = "Task Hearing \n";
+            $export_data.= "Total Hearing : ".sizeof($task_list)."\n";
+            $a = 1;
+            $export_data .= "\n";
+            $export_data .= "Sr. No.\tProject Name\tTask\tAssignee\tPriority\tStatus\tType\tStart Date\tEnd Date\n";
+        foreach ($task_list as $row) {
+            if ($row->assignee != null) {
+                $assignee = json_decode($row->assignee);
+                // $staff_name = DB::table('staff')->where('sid', $assignee)->pluck('name');
+                $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                $assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+            }
+               else
+                {
+                    $assignee_name='';
+                }
+            $priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+            $type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+            $status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+            if($row->start_date!="")
+            {
+                $start_date=date('d/m/Y',strtotime($row->start_date));
+            }
+            else
+            {
+                $start_date="";
+            }
+            if($row->end_date!="")
+            {
+                $end_date=date('d/m/Y',strtotime($row->end_date));
+            }
+            else
+            {
+                $end_date="";
+            }
+
+            $lineData = array($a++, $row->project_name,$row->title,$assignee_name,$priority_name,$status_name,$type_name,$start_date,$end_date);
+            $export_data .= implode("\t", array_values($lineData)) . "\n";
+        }
+        $out1 .= $export_data;
+        
+
+        return response($out1)
+            ->header("Content-Type", "application/vnd.ms-excel")
+            ->header("Content-Disposition", "attachment;filename=\"task_hearing.xls\"");
+
+            
+    }
+    public function raise_overdue(Request $request)
+    {
+        try {
+            
+            $task_id=$request->task_id;
+            $staff_id=$request->staff_id;
+            $remark=$request->remark;
+
+            $check=DB::table('task_overdue_raise')->where('task_id',$task_id)->where('status','open')->count();
+            if($check>0)
+            {
+                return response()->json(["status" => "error","msg"=>"This task has been already raised"]);
+            }
+            else
+            {
+                $insert=DB::table('task_overdue_raise')->insert(['task_id'=>$task_id,'raised_by'=>$staff_id,'remark'=>$remark,'raised_date'=>date('Y-m-d')]);
+                if($insert)
+                {
+                    return response()->json(["status" => "success","msg"=>"Raised successfully"]);
+                }
+                else
+                {
+                    return response()->json(["status" => "error","msg"=>"Can`t be raised"]);
+                }
+            }
+            
+           
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+    public function raised_overdue_task(Request $request)
+    {
+        try {
+            
+          
+             
+            
+                $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+        return view(
+            "pages.task.raised_overdue_task",
+            compact(
+                "services_list",
+                "staff_list",
+                "project_status_master",
+                "task_status_master",
+                "task_priority",
+                "task_type",
+                "project_list",
+                "office_list",
+                
+            )
+        );
+            
+           
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+    public function get_raised_overdue_task(Request $request)
+    {
+        try {
+            
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "task_overdue_raise.status As raised_status",
+                "task_overdue_raise.id As raised_id",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            $today=date('Y-m-d');
+           
+              
+                $task_list = DB::table('task_overdue_raise')
+                    ->leftjoin("task","task.id","task_overdue_raise.task_id")
+                    ->leftjoin("projects", "projects.id", "task.project_id")
+                    ->leftjoin(
+                        "task_status_master",
+                        "task_status_master.id",
+                        "task.status"
+                    )->get($fields);
+
+                 foreach ($task_list as $row) {
+                    if ($row->assignee != null) {
+                        $assignee = json_decode($row->assignee);
+                        $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                        $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                    }
+                     else
+                        {
+                            $row->assignee_name='';
+                        }
+                    $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                    $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                    $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                    //office 
+                    $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                    $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                    $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                    if($row->dept_geolocation == '["\"\"","\"\""]'){
+                        $row->dept_geolocation = null;
+                    }
+                    $row->overdue_days=  $this->dateDiffInDays($row->end_date,date('Y-m-d')) . " Days";
+                    $row->lat_long = null;
+                    if($row->dept_geolocation != null){
+                       // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                       // ["73.8456881","18.5199832"] 
+                        $lat_long = json_decode($row->dept_geolocation,true);
+                        $row->lat_long = $lat_long[1].",".$lat_long[0];
+                    }
+                    //Total Working Hr
+                    $total_working_hr = 0;
+                    if($row->working_hr != null){
+                      $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                    }
+                    $row->total_working_hr = $total_working_hr ." Hr";
+                }
+
+             
+            
+                $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+        return view(
+            "pages.task.get_raised_overdue_task",
+            compact(
+                "services_list",
+                "staff_list",
+                "project_status_master",
+                "task_status_master",
+                "task_priority",
+                "task_type",
+                "project_list",
+                "office_list",
+                "task_list"
+            )
+        );
+            
+           
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+    public function reject_overdue_task(Request $request)
+    {
+        try {
+            
+            $raised_id=$request->raised_id;
+           
+
+           
+                $reject=DB::table('task_overdue_raise')->where('id',$raised_id)->update(['status'=>'rejected','update_by'=>session('staff_id')]);
+                if($reject)
+                {
+                    return response()->json(["status" => "success","msg"=>"Raised request Rejected"]);
+                }
+                else
+                {
+                    return response()->json(["status" => "error","msg"=>"Raised request can`t be Rejected"]);
+                }
+            
+            
+           
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+   public function approve_overdue(Request $request)
+    {
+        try 
+        {
+            
+            $raised_id=$request->raised_id;
+            $task_id=$request->task_id;
+            $staff_id=$request->staff_id;
+            $raise_end_date=$request->raise_end_date;
+            $raise_task_status=$request->raise_task_status;
+            $end_date = str_replace("/", "-", $raise_end_date);
+            $end_date = date("Y-m-d", strtotime($end_date));
+            $update=DB::table('task')->where('id',$task_id)->update(['end_date'=>$end_date,'status'=>$raise_task_status]);
+            
+            if($update)
+            {
+                $approve=DB::table('task_overdue_raise')->where('id',$raised_id)->update(['status'=>'approved','update_by'=>session('staff_id')]);
+                if($approve)
+                {
+                    return response()->json(["status" => "success","msg"=>"Raised request approved"]);
+                }
+                else
+                {
+                    return response()->json(["status" => "error","msg"=>"Raised request can`t be approved"]);
+                }
+            }
+            else
+            {
+                return response()->json(["status" => "error","msg"=>"End date can`t be updated"]);
+            }
+            
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+     public function get_my_overdue(Request $request)
+    {
+        
+            $fields = [
+            "task.id",
+            "task.project_id",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.file_link",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.created_at",
+            "projects.project_name",
+            "projects.start_date as project_start_date",
+            "projects.end_date  as project_end_date",
+            "projects.service_id as poject_service_id",
+            "projects.created_at as poject_created_at",
+            "task_status_master.status as task_status",
+        ];
+        $today='2025-08-01';
+       
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                );
+            $status_arr=array(3,4,5,7);
+            $task_list = $task_list->where('task.end_date','<',$today)->whereNotIn('task.status',$status_arr)->orderBy('end_date','desc');
+            
+           
+                     $task_list = $task_list->whereJsonContains('task.assignee','6')->get($fields);
+                    
+                foreach($task_list as $tl)
+                  {
+                      log::info('task_id='.$tl->id);
+                      
+                            $insert=DB::table('task_overdue_raise')->insert(['task_id'=>$tl->id,'raised_by'=>1,'remark'=>'Done','raised_date'=>date('Y-m-d')]);
+                       
+                  }
+                 
+
+         // return  $this->send_push_notification('testing','hello',['51'],'task',$icon='','task');
+    }
+    public function project_timeline(Request $request){
+        try{
+        $staff_list = $this->get_staff_list();
+        $services_list = DB::table("quotation_details")
+            ->join("services", "quotation_details.task_id", "services.id")
+            ->distinct()
+            ->where("quotation_details.finalize", "yes")
+            ->get(["services.id", "services.name"]);
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+         //task_priority
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        $office_list = DB::table('dept_address')->get();
+
+        $rawTaskCounts = DB::table('task_logs')
+            ->join('projects', 'projects.id', '=', 'task_logs.project_id')
+            ->join('task_type', 'task_type.id', '=', 'task_logs.type')
+            ->leftjoin('task_priority', 'task_priority.id', '=', 'task_logs.priority')
+            ->join('task_status_master', 'task_status_master.id', '=', 'task_logs.status')
+            ->leftJoin('staff as created_by_staff', 'created_by_staff.sid', '=', 'task_logs.created_by')
+            ->leftJoin('staff as updated_by_staff', 'updated_by_staff.sid', '=', 'task_logs.updated_by')
+            ->select(
+                'projects.id as project_id',
+                'projects.project_name',
+                'projects.start_date',
+                'projects.end_date',
+                'task_logs.task_id',
+                'task_logs.title',
+                'task_logs.start_date as task_start_date',
+                'task_logs.end_date as task_end_date',
+                'task_logs.assign_date',
+                'task_logs.assignee',
+                'task_priority.priority',
+                'task_logs.created_by',
+                'task_logs.updated_by',
+                'task_type.id as type_id',
+                'task_type.type as task_type_name',
+                'task_status_master.id as status_id',
+                'task_status_master.status as task_status',
+                'created_by_staff.name as created_by_name',
+                'updated_by_staff.name as updated_by_name'
+            )
+            ->where('projects.id',$request->project_id)
+            ->get();
+
+        $projectTaskData = [];
+
+        foreach ($rawTaskCounts as $taskLog) {
+            if (!isset($projectTaskData[$taskLog->project_id])) {
+                $projectTaskData[$taskLog->project_id] = [
+                    'project_id' => $taskLog->project_id,
+                    'project_name' => $taskLog->project_name,
+                    'start_date' => $taskLog->start_date,
+                    'end_date' => $taskLog->end_date,
+                    'tasks' => []
+                    
+                ];
+            }
+
+            $taskLog->task_start_date = empty($taskLog->task_start_date) ? 'NULL' : date('d M, Y', strtotime($taskLog->task_start_date));
+            $taskLog->task_end_date = empty($taskLog->task_end_date) ? 'NULL' : date('d M, Y', strtotime($taskLog->task_end_date));
+
+            $assigneeIds = $taskLog->assignee;
+            if (is_string($assigneeIds)) {
+                if ($this->isJson($assigneeIds)) {
+                    $assigneeIds = json_decode($assigneeIds, true);
+                } else {
+                    $assigneeIds = explode(',', $assigneeIds);
+                }
+            }
+
+            if (!is_array($assigneeIds)) {
+                $assigneeIds = [$assigneeIds]; 
+            }
+
+            if (!empty($assigneeIds)) {
+                        $taskLog->assignee_names = DB::table('staff')
+                        ->whereIn('sid', $assigneeIds)
+                        ->pluck('name')
+                        ->implode(', ');
+            }
+
+            if (!isset($projectTaskData[$taskLog->project_id]['tasks'][$taskLog->task_id])) {
+                $projectTaskData[$taskLog->project_id]['tasks'][$taskLog->task_id] = [
+                    'task_id' => $taskLog->task_id,
+                    'title' => $taskLog->title,
+                    'task_start_date' => $taskLog->task_start_date,
+                    'task_end_date' => $taskLog->task_end_date,
+                    'assign_date' => $taskLog->assign_date,
+                    'assignee_names' => $taskLog->assignee_names,
+                    'created_by_name'=>$taskLog->created_by_name,
+                    'updated_by_name'=>$taskLog->updated_by_name,
+                    'priority'=>$taskLog->priority,
+                    'task_types' => []
+                ];
+            }
+
+            $taskTypeExists = false;
+            foreach ($projectTaskData[$taskLog->project_id]['tasks'][$taskLog->task_id]['task_types'] as &$taskType) {
+                if ($taskType['type_id'] === $taskLog->type_id) {
+                    $taskType['statuses'][] = [
+                        'task_status' => $taskLog->task_status,
+                    ];
+                    $taskTypeExists = true;
+                    break;
+                }
+            }
+
+            if (!$taskTypeExists) {
+                $projectTaskData[$taskLog->project_id]['tasks'][$taskLog->task_id]['task_types'][] = [
+                    'type_id' => $taskLog->type_id,
+                    'task_type_name' => $taskLog->task_type_name,
+                    'statuses' => [
+                        [
+                            'task_status' => $taskLog->task_status,
+                        ]
+                    ]
+                ];
+            }
+            
+        }
+        $finalProjectTaskData = array_values($projectTaskData);
+        foreach ($finalProjectTaskData as &$project) {
+            $project['tasks'] = array_values($project['tasks']);
+            foreach ($project['tasks'] as &$task) {
+                $task['task_types'] = array_values($task['task_types']);
+            }
+        }
+            // log::info($finalProjectTaskData);
+            // exit;
+        
+
+        return view('pages.task.project_timeline',compact(
+                "services_list",
+                "staff_list",
+                "project_status_master",
+                "task_status_master",
+                "task_priority",
+                "task_type",
+                "project_list",
+                "office_list",
+                "finalProjectTaskData"
+            ));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(["status" => "error","msg"=>"Database error"]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(["status" => "error","msg"=> "Error"]);
+        }
+    }
+   public function app_task_hearing(Request $request)
+    {
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            $task_filter_status = $request->task_filter_status;
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at",
+                "task_status_master.status as task_status",
+            ];
+            $hearing_id = 4;
+            $hearing_filter_from_date = $request->hearing_filter_from_date;
+            $hearing_filter_to_date = $request->hearing_filter_to_date;
+            log::info($hearing_filter_from_date . '-' . $hearing_filter_to_date);
+
+                $staff_id=$request->staff_id;
+                $staff_id = (string)$staff_id;
+           
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                )->where(function ($query) use ($staff_id, $hearing_id, $task_filter_status, $hearing_filter_from_date, $hearing_filter_to_date) {
+                    if ($staff_id != '') {
+                        $query->whereJsonContains('task.assignee', $staff_id);
+                    }
+                    $query->where('task.type', $hearing_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($hearing_filter_from_date != '') {
+                        $hearing_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_from_date)));
+                        $query->where('task.start_date', '>=', $hearing_filter_from_date);
+                    }
+                    if ($hearing_filter_to_date != '') {
+                        $hearing_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_to_date)));
+                        $query->where('task.start_date', '<=', $hearing_filter_to_date);
+                    }
+                })->orWhere(function ($query) use ($staff_id, $hearing_id, $task_filter_status, $hearing_filter_from_date, $hearing_filter_to_date) {
+                    if ($staff_id != '') {
+                        $query->whereJsonContains('task.assignee', $staff_id);
+                    }
+                    $query->where('task.type', $hearing_id);
+                    if ($task_filter_status != '') {
+                        $query->whereIn('task.status', $task_filter_status);
+                    }
+                    if ($hearing_filter_from_date != '') {
+                        $hearing_filter_from_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_from_date)));
+                        $query->where('task.end_date', '>=', $hearing_filter_from_date);
+                    }
+                    if ($hearing_filter_to_date != '') {
+                        $hearing_filter_to_date = date('Y-m-d', strtotime(str_replace('/', '-', $hearing_filter_to_date)));
+                        $query->where('task.end_date', '<=', $hearing_filter_to_date);
+                    }
+                })->orderBy('task.start_date')->get($fields);
+
+            foreach ($task_list as $row) {
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    // $staff_name = DB::table('staff')->where('sid', $assignee)->pluck('name');
+                    $staff_shortname = DB::table('staff')->where('sid', $assignee)->pluck('short_name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                }
+                   else
+                    {
+                        $row->assignee_name='';
+                    }
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+              return response()->json(["status" => "success","data"=>$task_list]);
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+      public function my_task(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+        return view(
+            "pages.task.my_task",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list"
+            )
+
+        );
+    }
+    public function get_my_task(Request $request)
+    {
+       
+        try {
+            Log::info("inside task_list");
+            $search = $request->search_task;
+            $staff = $this->get_staff_list();
+            $fields = [
+                "task.id",
+                "task.project_id",
+                "task.title",
+                "task.description",
+                "task.type",
+                "task.file_link",
+                "task.priority",
+                "task.assignee",
+                "task.due_date",
+                "task.start_date",
+                "task.end_date",
+                "task.is_milestone",
+                "task.status",
+                "task.office_id",
+                "task.working_hr",
+                "task.time",
+                "task.view",
+                "task.created_at",
+                "projects.project_name",
+                "projects.start_date as project_start_date",
+                "projects.end_date  as project_end_date",
+                "projects.service_id as poject_service_id",
+                "projects.created_at as poject_created_at"
+                
+            ];
+            $today=date('Y-m-d');
+        
+                $staff_id = session('staff_id');
+                $staff_id = (string)$staff_id;
+                $task_status = DB::table("task_status_master")->get(["id", "status"]);
+               
+                foreach ($task_status as $tsk) {
+                 $task_list = DB::table("task")
+                            ->leftjoin("projects", "projects.id", "task.project_id")
+                            ->where('task.status', $tsk->id)
+                            ->whereJsonContains('task.assignee', $staff_id)->get($fields);
+                    foreach ($task_list as $row) {
+                        $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                        $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                        if ($row->assignee != null) {
+                            $assignee = json_decode($row->assignee);
+                            // $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                            $staff_shortname = DB::table('staff')->whereIn('sid', $assignee)->pluck('short_name');
+                            $row->assignee_name = rtrim(implode(',', json_decode($staff_shortname)), ',');
+                        } else {
+                            $row->assignee_name = '';
+                        }
+                        //office 
+                        $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                        $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                        $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                        if ($row->dept_geolocation == '["\"\"","\"\""]') {
+                            $row->dept_geolocation = null;
+                        }
+                        $row->lat_long = null;
+                        if ($row->dept_geolocation != null) {
+                            // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                            // ["73.8456881","18.5199832"] 
+                            $lat_long = json_decode($row->dept_geolocation, true);
+                            $row->lat_long = $lat_long[1] . "," . $lat_long[0];
+                        }
+                        //Total Working Hr
+                        $total_working_hr = 0;
+                        if ($row->working_hr != null) {
+                            $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                        }
+                        $row->total_working_hr = $total_working_hr . " Hr";
+                    }
+    
+                    $tsk->task = $task_list;
+                }
+    
+            return view(
+                "pages.task.get_my_task",
+                compact('task_status')
+            );
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json([
+                "status" => "error",
+                "msg" => "Something went wrong,please contact to support team.",
+            ]);
+        }
+    }
+    public function my_task_grid(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->where('id','!=',5)->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+      
+           
+        
+        return view(
+            "pages.task.my_task_grid",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list",
+              
+            )
+
+        );
+    }
+    public function get_my_task_grid(Request $request)
+    {
+        $office_list=DB::table('dept_address')->get();
+        $staff_list = $this->get_staff_list();
+        $project_status_master = DB::table("project_status_master")->get([
+            "id",
+            "status",
+        ]);
+        $task_priority = DB::table("task_priority")->where('status', 1)->get(["id", "priority"]);
+        $task_status_master = DB::table("task_status_master")->where('id','!=',5)->get([
+            "id",
+            "status",
+        ]);
+        //task_type
+        $task_type = DB::table("task_type")->where('status', 1)->get(["id", "type"]);
+        if (session('role_id') == 1) {
+            $project_list = DB::table('projects')->where('active', 'yes')->get();
+        } else {
+            $project_ids = DB::table('projects_assignee')
+                ->where('staff_id', session('staff_id'))
+                ->pluck('projects_id');
+            $project_list = DB::table('projects')->where('active', 'yes')->whereIn('id', $project_ids)->get();
+        }
+
+       
+        $fields = [
+            "task.id",
+            "task.project_id",
+            "task.title",
+            "task.description",
+            "task.type",
+            "task.file_link",
+            "task.priority",
+            "task.assignee",
+            "task.due_date",
+            "task.start_date",
+            "task.end_date",
+            "task.is_milestone",
+            "task.status",
+            "task.office_id",
+            "task.working_hr",
+            "task.time",
+            "task.view",
+            "task.created_at",
+            "projects.project_name",
+            "projects.start_date as project_start_date",
+            "projects.end_date  as project_end_date",
+            "projects.service_id as poject_service_id",
+            "projects.created_at as poject_created_at",
+            "task_status_master.status as task_status",
+        ];
+        $today=date('Y-m-d');
+        $staff_id = session('staff_id');
+                $staff_id = (string)$staff_id;
+            $task_list = DB::table("task")
+                ->leftjoin("projects", "projects.id", "task.project_id")
+                ->leftjoin(
+                    "task_status_master",
+                    "task_status_master.id",
+                    "task.status"
+                );
+            
+            $task_list = $task_list->orderBy('end_date','desc')->whereJsonContains('task.assignee', $staff_id)->get($fields);
+
+            foreach ($task_list as $row) {
+                $row->raise_count=DB::table('task_overdue_raise')->where('task_id',$row->id)->count();
+                $row->priority_name = DB::table('task_priority')->where('id', $row->priority)->value('priority');
+                $row->type_name = DB::table('task_type')->where('id', $row->type)->value('type');
+                $row->status_name = DB::table('task_status_master')->where('id', $row->status)->value('status');
+                //office 
+                $row->dept_name = DB::table('dept_address')->where('id', $row->office_id)->value('department_name');
+                $row->dept_address = DB::table('dept_address')->where('id', $row->office_id)->value('address');
+                $row->dept_geolocation = DB::table('dept_address')->where('id', $row->office_id)->value('geolocation');
+                if($row->dept_geolocation == '["\"\"","\"\""]'){
+                    $row->dept_geolocation = null;
+                }
+                if ($row->assignee != null) {
+                    $assignee = json_decode($row->assignee);
+                    $staff_name = DB::table('staff')->whereIn('sid', $assignee)->pluck('name');
+                    $row->assignee_name = rtrim(implode(',', json_decode($staff_name)), ',');
+                } else {
+                    $row->assignee_name = '';
+                }
+                $row->overdue_days=  $this->dateDiffInDays($row->end_date,date('Y-m-d'));
+                $row->lat_long = null;
+                if($row->dept_geolocation != null){
+                   // latitude is -33.8688 and longitude is 151.2093 (Sydney, Australia
+                   // ["73.8456881","18.5199832"] 
+                    $lat_long = json_decode($row->dept_geolocation,true);
+                    $row->lat_long = $lat_long[1].",".$lat_long[0];
+                }
+                //Total Working Hr
+                $total_working_hr = 0;
+                if($row->working_hr != null){
+                  $total_working_hr =  $this->totalWorkingHr($row->working_hr);
+                }
+                $row->total_working_hr = $total_working_hr ." Hr";
+            }
+
+        
+        return view(
+            "pages.task.get_my_task_grid",
+            compact(
+                'staff_list',
+                "project_status_master",
+                "task_priority",
+                "task_type",
+                "task_status_master",
+                "project_list",
+                "office_list",
+                "task_list"
+            )
+
+        );
+    }
+}

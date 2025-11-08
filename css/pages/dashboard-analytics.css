@@ -1,0 +1,136 @@
+/* dashboard analytics page css */
+/*------------------------------*/
+#donut-chart .apexcharts-canvas {
+  margin: 0 auto;
+}
+
+.icon-light {
+  color: #b3c0ce;
+}
+
+.show > .btn-outline-secondary.dropdown-toggle {
+  color: #ffffff !important;
+}
+
+.activity-content {
+  margin-bottom: 0.5rem;
+}
+
+.sales-info-content h1,
+.sales-info-content h2,
+.sales-info-content h3,
+.sales-info-content h4,
+.sales-info-content h5,
+.sales-info-content h6 {
+  line-height: 0.7;
+}
+
+.widget-todo .dropdown .dropdown-toggle:after {
+  /* widget todo-task list - dropdown arrow position */
+  left: 0.1rem;
+  color: #b3c0ce;
+}
+
+.timeline {
+  padding-right: 0;
+}
+
+.timeline .timeline-text {
+  color: #828d99;
+  font-size: 13px;
+}
+
+.timeline .timeline-content {
+  color: #304156;
+  font-size: 13px;
+  font-weight: 500;
+  padding-left: 0 !important;
+}
+
+.timeline .timeline-time {
+  font-size: 0.8rem !important;
+}
+
+@media screen and (max-width: 1280px) and (min-width: 960px) {
+  .activity-card,
+  .profit-report-card,
+  .sales-card,
+  .growth-card {
+    flex: 0 0 50%;
+    min-width: 50%;
+  }
+}
+@media screen and (max-width: 1320px) and (min-width: 1200px) {
+  .dashboard-referral-impression .donut-chart-wrapper ul li {
+    font-size: 0.8rem;
+  }
+
+  #primary-line-chart,
+  #warning-line-chart {
+    display: none;
+  }
+}
+
+.input_control {
+  border: 0px !important;
+  font-size: 12px;
+  border-bottom: 1px solid #000 !important;
+  border-radius: 0rem !important;
+  margin-top: -10px;
+}
+
+.form-control:focus {
+  box-shadow: none !important;
+}
+
+#search_card {
+  box-shadow: 0px 2px 4px rgba(152, 152, 152, 0.1) !important;
+}
+
+.search_hr {
+  width: 100%;
+  border-top: 2px solid #e3e3e3;
+}
+
+.nd {
+  margin-top: 20px;
+}
+
+.client_info span {
+  font-size: 13px;
+  margin-left: 8px !important;
+}
+
+.client_info i {
+  font-size: 14px;
+}
+
+.rectangle {
+  background: #ffffff;
+  border: 3px solid #d6e1f2;
+  box-sizing: border-box;
+  border-radius: 20px;
+  padding: 6px 3px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.rectangle:hover {
+  background: #e6ebf4;
+  border: 3px solid #e6ebf4;
+}
+
+.table thead th {
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+}
+
+.table th,
+.table td {
+  padding: 4px 6px !important;
+  border-bottom: 0px !important;
+}
+.dashboard-card-header
+{
+  padding:1.0rem 0.8rem 0.4rem 0.8rem ;
+}

@@ -1,0 +1,75 @@
+/* Authentication page css */
+/*-------------------------*/
+.bg-authentication {
+  background-color: #000808;
+}
+
+.bg-authentication #icon-arrow {
+  position: absolute;
+  top: 11px;
+  right: 15px;
+}
+
+.bg-authentication .brand-text {
+  color: #5A8DEE;
+  font-weight: 600;
+  letter-spacing: 0.01rem;
+}
+.logo_div 
+{
+  height: 55px;
+}
+.logo_img 
+{
+  height:45px;
+}
+
+.client_management_div
+{
+  max-height: 30px;
+  font-family: inherit;
+  color: #d0cbcb;
+  font-size: 1.65em;
+  font-weight: 600;
+
+}
+.input_div 
+{
+  margin-bottom:2em;
+}
+.input_login
+{
+  
+    line-height: 1.4;
+    color: #f2f4f7;
+    background-color: #212022;
+    /* background-clip: padding-box; */
+    border: 1px solid #191a1b;
+    border-radius: 0.267rem;
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+.forgot_a
+{
+  color: #d0cbcb;
+}
+.card_row
+{
+  padding-bottom: 12px;
+}
+.card 
+{
+  border-radius: 1.217rem;
+}
+@media only screen and (min-width: 992px) {
+  .bg-authentication .disable-rounded-right {
+    border-top-right-radius: 1.217rem;
+    border-bottom-right-radius: 0px;
+  }
+}
+@media screen and (-ms-high-contrast: active), (-ms-high-contrast: none) {
+  /* IE Specific CSS */
+  .bg-authentication {
+    width: 100%;
+    display: block;
+  }
+}

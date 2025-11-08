@@ -1,0 +1,1658 @@
+<?php
+ 
+namespace App\Http\Controllers;
+use Illuminate\Http\Request;
+use App\Traits\ExpenseTraits;
+use App\Traits\StaffTraits;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+
+class AttendanceReportController extends Controller
+{
+    use ExpenseTraits;
+    use StaffTraits;
+
+    public function staff_attendance_excel(Request $request)
+    {
+        $month_filter = $request->month;
+        $quarter_filter = $request->quarter;
+        $year_filter = $request->year;
+
+        $month = date("m", strtotime($month_filter));
+
+        $year = explode('-', $year_filter);
+
+        $start_fiscal_year = strtotime('1-April-' . $year[0]);
+        $end_fiscal_year = strtotime('31-March-' . $year[1]);
+        $start_year = date('Y-m-d', $start_fiscal_year);
+        $end_year = date('Y-m-d', $end_fiscal_year);
+
+        if ($month > 03) {
+            $curr_year = $year[0];
+        } else {
+            $curr_year = $year[1];
+        }
+
+        if ($quarter_filter != 'none' && $year_filter != 'none' && $month_filter == 'none') {
+            if ($quarter_filter == 'Fourth Quarter') {
+                $start_date = strtotime('1-January-' . $year[1]);
+                $end_date = strtotime('31-March-' . $year[1]);
+                $start_quarter = date('Y-m-d 00:00:00', $start_date);
+                $end_quarter = date('Y-m-d 23:59:59', $end_date);
+
+                $staff1 = DB::table('staff')->get();
+
+                $staff_id = array();
+                foreach ($staff1 as $stf) {
+                    $company = json_decode($stf->company);
+                    for ($i = 0; $i < sizeof($company); $i++) {
+                        if ($company[$i] == session('company_id')) {
+                            $staff_id[] = $stf->sid;
+                        }
+                    }
+                }
+
+                $staff = DB::table('staff')
+                    ->join('users', 'users.user_id', 'staff.sid')
+                    ->select('staff.*', 'users.id as user_id')
+                    ->where('users.status', 'active')
+                    ->whereIn('staff.sid', $staff_id)
+                    ->orderBy('staff.sid', 'asc')
+                    ->get();
+
+                $out1 = '';
+                $export_data = "Attendance Report -\n";
+                foreach ($staff as $val) {
+                    $attendance_list = DB::table('attendance')
+                       
+                        ->where('staff_id', $val->sid)
+                        ->whereBetween('signin_date', [$start_quarter, $end_quarter])
+                        ->orderBy('signin_date', 'desc')
+                        ->get();
+
+                    if ($attendance_list != '[]') {
+                        $a = 1;
+                        $export_data .= "Staff -" . $val->name . ":\n";
+                        $export_data .= "\n";
+                        $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                        foreach ($attendance_list as $row) {
+                            $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                            $signin_time = $row->signin_time;
+                            if (!empty($row->signout_date)) {
+                                $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                            } else {
+                                $signout_date = '';
+                            }
+                            $signout_time = $row->signout_time;
+                            if (empty($row->signout_address)) {
+                                $row->signout_address = '';
+                            }
+                            $signin_location = json_decode($row->signin_location);
+                            if ($signin_location != '') {
+
+                                $row->signin_longitude = $signin_location[0];
+                                $row->signin_latitude = $signin_location[1];
+                            } else {
+                                $row->signin_longitude = "";
+                                $row->signin_latitude = "";
+                            }
+
+                            $signout_location = json_decode($row->signout_location);
+                            if ($signout_location != '') {
+
+                                $row->signout_longitude = $signout_location[0];
+                                $row->signout_latitude = $signout_location[1];
+                            } else {
+                                $row->signout_longitude = "";
+                                $row->signout_latitude = "";
+                            }
+                            $signin_time = strtotime($row->signin_time);
+                            $signout_time = strtotime($row->signout_time);
+                            if ($signout_time == "") {
+                                $total_working_hr = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $minute = $diff % 60;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            }
+                            $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $total_working_hr);
+                            $export_data .= implode("\t", array_values($lineData)) . "\n";
+                        }
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                    }
+                }
+                $out1 .= $export_data;
+            }
+
+            if ($quarter_filter == 'First Quarter') {
+                $start_date = strtotime('1-April-' . $year[0]);
+                $end_date = strtotime('30-June-' . $year[0]);
+                $start_quarter = date('Y-m-d 00:00:00', $start_date);
+                $end_quarter = date('Y-m-d 23:59:59', $end_date);
+                $staff1 = DB::table('staff')->get();
+
+                $staff_id = array();
+                foreach ($staff1 as $stf) {
+                    $company = json_decode($stf->company);
+                    for ($i = 0; $i < sizeof($company); $i++) {
+                        if ($company[$i] == session('company_id')) {
+                            $staff_id[] = $stf->sid;
+                        }
+                    }
+                }
+
+                $staff = DB::table('staff')
+                    ->join('users', 'users.user_id', 'staff.sid')
+                    ->select('staff.*', 'users.id as user_id')
+                    ->where('users.status', 'active')
+                    ->whereIn('staff.sid', $staff_id)
+                    ->orderBy('staff.sid', 'asc')
+                    ->get();
+
+                $out1 = '';
+
+                $export_data = "Attendance Report -\n";
+                foreach ($staff as $val) {
+                    $attendance_list = DB::table('attendance')
+                        ->where('staff_id', $val->sid)
+                        ->whereBetween('signin_date', [$start_quarter, $end_quarter])
+                        ->orderBy('signin_date', 'desc')
+                        ->get();
+
+                    if ($attendance_list != '[]') {
+                        $a = 1;
+                        $export_data .= "Staff -" . $val->name . ":\n";
+                        $export_data .= "\n";
+                        $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                        foreach ($attendance_list as $row) {
+                            $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                            $signin_time = $row->signin_time;
+                            if (!empty($row->signout_date)) {
+                                $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                            } else {
+                                $signout_date = '';
+                            }
+                            $signout_time = $row->signout_time;
+                            if (empty($row->signout_address)) {
+                                $row->signout_address = '';
+                            }
+                            $signin_location = json_decode($row->signin_location);
+                            if ($signin_location != '') {
+
+                                $row->signin_longitude = $signin_location[0];
+                                $row->signin_latitude = $signin_location[1];
+                            } else {
+                                $row->signin_longitude = "";
+                                $row->signin_latitude = "";
+                            }
+
+                            $signout_location = json_decode($row->signout_location);
+                            if ($signout_location != '') {
+
+                                $row->signout_longitude = $signout_location[0];
+                                $row->signout_latitude = $signout_location[1];
+                            } else {
+                                $row->signout_longitude = "";
+                                $row->signout_latitude = "";
+                            }
+                            $signin_time = strtotime($row->signin_time);
+                            $signout_time = strtotime($row->signout_time);
+                            if ($signout_time == "") {
+                                $total_working_hr = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $minute = $diff % 60;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            }
+                            $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $total_working_hr);
+                            $export_data .= implode("\t", array_values($lineData)) . "\n";
+                        }
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                    }
+                }
+                $out1 .= $export_data;
+            }
+
+            if ($quarter_filter == 'Second Quarter') {
+                $start_date = strtotime('1-July-' . $year[0]);
+                $end_date = strtotime('30-September-' . $year[0]);
+                $start_quarter = date('Y-m-d 00:00:00', $start_date);
+                $end_quarter = date('Y-m-d 23:59:59', $end_date);
+                $staff1 = DB::table('staff')->get();
+
+                $staff_id = array();
+                foreach ($staff1 as $stf) {
+                    $company = json_decode($stf->company);
+                    for ($i = 0; $i < sizeof($company); $i++) {
+                        if ($company[$i] == session('company_id')) {
+                            $staff_id[] = $stf->sid;
+                        }
+                    }
+                }
+
+                $staff = DB::table('staff')
+                    ->join('users', 'users.user_id', 'staff.sid')
+                    ->select('staff.*', 'users.id as user_id')
+                    ->where('users.status', 'active')
+                    ->whereIn('staff.sid', $staff_id)
+                    ->orderBy('staff.sid', 'asc')
+                    ->get();
+
+                $out1 = '';
+
+                $export_data = "Attendance Report -\n";
+                foreach ($staff as $val) {
+                    $attendance_list = DB::table('attendance')
+                        ->where('staff_id', $val->sid)
+                        ->whereBetween('signin_date', [$start_quarter, $end_quarter])
+                        ->orderBy('signin_date', 'desc')
+                        ->get();
+
+                    if ($attendance_list != '[]') {
+                        $a = 1;
+                        $export_data .= "Staff -" . $val->name . ":\n";
+                        $export_data .= "\n";
+                        $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                        foreach ($attendance_list as $row) {
+                            $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                            $signin_time = $row->signin_time;
+                            if (!empty($row->signout_date)) {
+                                $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                            } else {
+                                $signout_date = '';
+                            }
+                            $signout_time = $row->signout_time;
+                            if (empty($row->signout_address)) {
+                                $row->signout_address = '';
+                            }
+                            $signin_location = json_decode($row->signin_location);
+                            if ($signin_location != '') {
+
+                                $row->signin_longitude = $signin_location[0];
+                                $row->signin_latitude = $signin_location[1];
+                            } else {
+                                $row->signin_longitude = "";
+                                $row->signin_latitude = "";
+                            }
+
+                            $signout_location = json_decode($row->signout_location);
+                            if ($signout_location != '') {
+
+                                $row->signout_longitude = $signout_location[0];
+                                $row->signout_latitude = $signout_location[1];
+                            } else {
+                                $row->signout_longitude = "";
+                                $row->signout_latitude = "";
+                            }
+                            $signin_time = strtotime($row->signin_time);
+                            $signout_time = strtotime($row->signout_time);
+                            if ($signout_time == "") {
+                                $total_working_hr = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $minute = $diff % 60;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            }
+                            $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $total_working_hr);
+                            $export_data .= implode("\t", array_values($lineData)) . "\n";
+                        }
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                    }
+                }
+                $out1 .= $export_data;
+            }
+
+            if ($quarter_filter == 'Third Quarter') {
+                $start_date = strtotime('1-October-' . $year[0]);
+                $end_date = strtotime('31-December-' . $year[0]);
+                $start_quarter = date('Y-m-d 00:00:00', $start_date);
+                $end_quarter = date('Y-m-d 23:59:59', $end_date);
+                $staff1 = DB::table('staff')->get();
+
+                $staff_id = array();
+                foreach ($staff1 as $stf) {
+                    $company = json_decode($stf->company);
+                    for ($i = 0; $i < sizeof($company); $i++) {
+                        if ($company[$i] == session('company_id')) {
+                            $staff_id[] = $stf->sid;
+                        }
+                    }
+                }
+
+                $staff = DB::table('staff')
+                    ->join('users', 'users.user_id', 'staff.sid')
+                    ->select('staff.*', 'users.id as user_id')
+                    ->where('users.status', 'active')
+                    ->whereIn('staff.sid', $staff_id)
+                    ->orderBy('staff.sid', 'asc')
+                    ->get();
+
+                $out1 = '';
+
+                $export_data = "Attendance Report -\n";
+                foreach ($staff as $val) {
+                    $attendance_list = DB::table('attendance')
+                        ->where('staff_id', $val->sid)
+                        ->whereBetween('signin_date', [$start_quarter, $end_quarter])
+                        ->orderBy('signin_date', 'desc')
+                        ->get();
+
+                    if ($attendance_list != '[]') {
+                        $a = 1;
+                        $export_data .= "Staff -" . $val->name . ":\n";
+                        $export_data .= "\n";
+                        $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                        foreach ($attendance_list as $row) {
+                            $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                            $signin_time = $row->signin_time;
+                            if (!empty($row->signout_date)) {
+                                $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                            } else {
+                                $signout_date = '';
+                            }
+                            $signout_time = $row->signout_time;
+                            if (empty($row->signout_address)) {
+                                $row->signout_address = '';
+                            }
+                            $signin_location = json_decode($row->signin_location);
+                            if ($signin_location != '') {
+
+                                $row->signin_longitude = $signin_location[0];
+                                $row->signin_latitude = $signin_location[1];
+                            } else {
+                                $row->signin_longitude = "";
+                                $row->signin_latitude = "";
+                            }
+
+                            $signout_location = json_decode($row->signout_location);
+                            if ($signout_location != '') {
+
+                                $row->signout_longitude = $signout_location[0];
+                                $row->signout_latitude = $signout_location[1];
+                            } else {
+                                $row->signout_longitude = "";
+                                $row->signout_latitude = "";
+                            }
+                            $signin_time = strtotime($row->signin_time);
+                            $signout_time = strtotime($row->signout_time);
+                            if ($signout_time == "") {
+                                $total_working_hr = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $minute = $diff % 60;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            }
+                            $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $total_working_hr);
+                            $export_data .= implode("\t", array_values($lineData)) . "\n";
+                        }
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                        $export_data .= "\n";
+                    }
+                }
+                $out1 .= $export_data;
+            }
+        }
+
+        if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+            $staff1 = DB::table('staff')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->select('staff.*', 'users.id as user_id')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get();
+
+            $out1 = '';
+            $export_data = "Attendance Report -\n";
+            foreach ($staff as $val) {
+                $attendance_list = DB::table('attendance')
+                   ->where('staff_id', $val->sid)
+                    ->whereMonth('signin_date', $month)
+                    ->whereYear('signin_date', $curr_year)
+                    ->orderBy('signin_date', 'desc')
+                    ->get();
+
+                if ($attendance_list != '[]') {
+                    $a = 1;
+                    $export_data .= "Staff -" . $val->name . ":\n";
+                    $export_data .= "\n";
+                    $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                    foreach ($attendance_list as $row) {
+                        $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                        $signin_time = $row->signin_time;
+                        if (!empty($row->signout_date)) {
+                            $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                        } else {
+                            $signout_date = '';
+                        }
+                        $signout_time = $row->signout_time;
+                        if (empty($row->signout_address)) {
+                            $row->signout_address = '';
+                        }
+                        $signin_location = json_decode($row->signin_location);
+                        if ($signin_location != '') {
+
+                            $row->signin_longitude = $signin_location[0];
+                            $row->signin_latitude = $signin_location[1];
+                        } else {
+                            $row->signin_longitude = "";
+                            $row->signin_latitude = "";
+                        }
+
+                        $signout_location = json_decode($row->signout_location);
+                        if ($signout_location != '') {
+
+                            $row->signout_longitude = $signout_location[0];
+                            $row->signout_latitude = $signout_location[1];
+                        } else {
+                            $row->signout_longitude = "";
+                            $row->signout_latitude = "";
+                        }
+                        $signin_time = strtotime($row->signin_time);
+                        $signout_time = strtotime($row->signout_time);
+                        if ($signout_time == "") {
+                            $total_working_hr = "Not Marked";
+                        } else {
+                            $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                            $hour = intval($diff / 60);
+                            $minute = $diff % 60;
+                            $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                        }
+                        $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $total_working_hr);
+                        $export_data .= implode("\t", array_values($lineData)) . "\n";
+                    }
+                    $export_data .= "\n";
+                    $export_data .= "\n";
+                    $export_data .= "\n";
+                }
+            }
+            $out1 .= $export_data;
+        }
+
+        if ($month_filter == 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+            $staff1 = DB::table('staff')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->select('staff.*', 'users.id as user_id')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get();
+
+            $out1 = '';
+            $export_data = "Attendance Report -\n";
+            foreach ($staff as $val) {
+                $attendance_list = DB::table('attendance')
+                   
+                    ->where('staff_id', $val->sid)
+                    ->whereBetween('signin_date', [$start_year, $end_year])
+                    ->orderBy('signin_date', 'desc')
+                    ->get();
+
+                if ($attendance_list != '[]') {
+                    $a = 1;
+                    $export_data .= "Staff -" . $val->name . ":\n";
+                    $export_data .= "\n";
+                    $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Address\tSign In Longitude\tSign In Latitude\tSign Out Date\tSign Out Time\tSign Out Address\tSign Out Longitude\tSign Out Latitude\tTotal Working hr\n";
+                    foreach ($attendance_list as $row) {
+                        $signin_date = date("d-M-Y", strtotime($row->signin_date));
+                        $signin_time = $row->signin_time;
+                        if (!empty($row->signout_date)) {
+                            $signout_date = date("d-M-Y", strtotime($row->signout_date)) . '';
+                        } else {
+                            $signout_date = '';
+                        }
+                        $signout_time = $row->signout_time;
+                        if (empty($row->signout_address)) {
+                            $row->signout_address = '';
+                        }
+                        $signin_location = json_decode($row->signin_location);
+                        if ($signin_location != '') {
+
+                            $row->signin_longitude = $signin_location[0];
+                            $row->signin_latitude = $signin_location[1];
+                        } else {
+                            $row->signin_longitude = "";
+                            $row->signin_latitude = "";
+                        }
+
+                        $signout_location = json_decode($row->signout_location);
+                        if ($signout_location != '') {
+
+                            $row->signout_longitude = $signout_location[0];
+                            $row->signout_latitude = $signout_location[1];
+                        } else {
+                            $row->signout_longitude = "";
+                            $row->signout_latitude = "";
+                        }
+                        $signin_time = strtotime($row->signin_time);
+                        $signout_time = strtotime($row->signout_time);
+                        if ($signout_time == "") {
+                            $row->total_working_hr = "Not Marked";
+                        } else {
+                            $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                            $hour = intval($diff / 60);
+                            $minute = $diff % 60;
+                            $row->total_working_hr = $hour . ' hr ' . $minute . ' min';
+                        }
+                        $lineData = array($a++, $signin_date, $signin_time, $row->signin_address, $row->signin_longitude, $row->signin_latitude, $signout_date, $signout_time, $row->signout_address, $row->signout_longitude, $row->signout_latitude, $row->total_working_hr);
+                        $export_data .= implode("\t", array_values($lineData)) . "\n";
+                    }
+                    $export_data .= "\n";
+                    $export_data .= "\n";
+                    $export_data .= "\n";
+                }
+            }
+            $out1 .= $export_data;
+        }
+
+        return response($out1)
+            ->header("Content-Type", "application/vnd.ms-excel")
+            ->header("Content-Disposition", "attachment;filename=\"Attendance_Report.xls\"");
+    }
+
+    public function staff_attendance_pdf(Request $request)
+    {
+        try {
+            // new code for pdf
+            require_once base_path('vendor/autoload.php');
+            $month_filter = $request->month;
+            $quarter_filter = $request->quarter;
+            $year_filter = $request->year;
+
+            $month = date("m", strtotime($month_filter));
+
+            $year = explode('-', $year_filter);
+
+            $start_fiscal_year = strtotime('1-April-' . $year[0]);
+            $end_fiscal_year = strtotime('31-March-' . $year[1]);
+            $start_year = date('Y-m-d', $start_fiscal_year);
+            $end_year = date('Y-m-d', $end_fiscal_year);
+
+            if ($month > 03) {
+                $curr_year = $year[0];
+            } else {
+                $curr_year = $year[1];
+            }
+
+
+            if (
+                $quarter_filter != 'none' && $year_filter != 'none' && $month_filter == 'none'
+            ) {
+                $FilterDate = $quarter_filter;
+            }
+
+            if (
+                $month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none'
+            ) {
+                $FilterDate = $month_filter . '/' . $curr_year;
+            }
+
+            if (
+                $month_filter == 'none' && $year_filter != 'none' && $quarter_filter == 'none'
+            ) {
+                $FilterDate = $year_filter;
+            }
+
+            $staff1 = DB::table('staff')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->select('staff.sid', 'staff.name')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get();
+
+            foreach ($staff as $val) {
+                if (
+                    $month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none'
+                ) {
+                    $start_date = date('Y-m-d', strtotime($curr_year . '-' . $month . '-01'));
+                    $end_date = date(
+                        'Y-m-t',
+                        strtotime($curr_year . '-' . $month . '-01')
+                    );
+                    $date_diff = strtotime($end_date) - strtotime($start_date);
+                    $count_date = $date_diff / (3600 * 24);
+                    $dateArr = [];
+                    //log::info('staff id ' . $val->sid);
+                    for ($i = 0; $i <= $count_date; $i++) {
+                        $loop_date_str = strtotime($start_date) + ($i * 3600 * 24);
+                        $mydate = date('Y-m-d', $loop_date_str);
+                        array_push($dateArr, $mydate);
+                        $val->signin_location = DB::table('attendance')->where('staff_id', '=', $val->sid)->whereDate('signin_date', $mydate)->value('signin_location');
+                    }
+
+                    $val->visit_list = DB::table('attendance')
+                        ->select('attendance.signin_date', 'office_visit.location', 'office_visit.created_at', 'dept_address.address')
+                        ->leftJoin('office_visit', function ($join) {
+                            $join->on('attendance.staff_id', '=', 'office_visit.visit_by')
+                                ->on('attendance.signin_date', '=', 'office_visit.visit_date');
+                        })
+                        ->leftJoin('dept_address', 'dept_address.id', 'office_visit.dept_address_id')
+                        ->where('visit_by', '=', $val->sid)
+                        ->whereMonth('signin_date', $month)
+                        ->whereYear('signin_date', $curr_year)
+                        ->get();
+                }
+            }
+            ini_set("pcre.backtrack_limit", "5000000");
+            $mpdf = new \Mpdf\Mpdf(['mode' => 'utf-8', 'format' => 'A4-L', 'orientation' => 'L']);
+
+            $mpdf->SetHeader('<div style="font-size:16px;font-weight:700;">{DATE j-M-Y}</div>');
+            $mpdf->setFooter('<div style="font-size:16px;font-weight:700;">{PAGENO}</div>');
+            $mpdf->SetDisplayMode('fullpage');
+            $mpdf->WriteHTML(view('pages.reports.get_attendance_report', compact('staff', 'FilterDate', 'dateArr')));
+            return ($mpdf->Output('Attendance_Report.pdf', 'I'));
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('failure', "Database Query Error! [" . $e->getMessage() . " ]");
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', $e->getMessage());
+        }
+    }
+
+    public function staff_attendance_print(Request $request)
+    {
+        try {
+            $month_filter = $request->month;
+            $quarter_filter = $request->quarter;
+            $year_filter = $request->year;
+
+            $month = date("m", strtotime($month_filter));
+
+            $year = explode('-', $year_filter);
+
+            $start_fiscal_year = strtotime('1-April-' . $year[0]);
+            $end_fiscal_year = strtotime('31-March-' . $year[1]);
+            $start_year = date('Y-m-d', $start_fiscal_year);
+            $end_year = date('Y-m-d', $end_fiscal_year);
+
+            if ($month > 03) {
+                $curr_year = $year[0];
+            } else {
+                $curr_year = $year[1];
+            }
+
+            if ($quarter_filter != 'none' && $year_filter != 'none' && $month_filter == 'none') {
+                $FilterDate = $quarter_filter;
+            }
+
+            if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                $FilterDate = $month_filter . '/' . $curr_year;
+            }
+
+            if ($month_filter == 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                $FilterDate = $year_filter;
+            }
+
+
+            $staff1 = DB::table('staff')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->select('staff.sid', 'staff.name')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get();
+            foreach ($staff as $val) {
+                if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                    $start_date = date('Y-m-d', strtotime($curr_year . '-' . $month . '-01'));
+                    $end_date = date('Y-m-t', strtotime($curr_year . '-' . $month . '-01'));
+                    $date_diff = strtotime($end_date) - strtotime($start_date);
+                    $count_date = $date_diff / (3600 * 24);
+                    $dateArr = [];
+                    for ($i = 0; $i <= $count_date; $i++) {
+                        $loop_date_str = strtotime($start_date) + ($i * 3600 * 24);
+                        $mydate = date('Y-m-d', $loop_date_str);
+                        array_push($dateArr, $mydate);
+                        $val->signin_location[$mydate] = DB::table('attendance')->where('staff_id', '=', $val->sid)->whereDate('signin_date', $mydate)->value('signin_location');
+                        $val->signout_location[$mydate] = DB::table('attendance')->where('staff_id', '=', $val->sid)->whereDate('signin_date', $mydate)->value('signout_location');
+                    }
+                    $val->visit_list = DB::table('attendance')
+                        ->select('attendance.signin_date', 'office_visit.location', 'office_visit.created_at', 'dept_address.address')
+                        ->leftJoin('office_visit', function ($join) {
+                            $join->on('attendance.staff_id', '=', 'office_visit.visit_by')
+                                ->on('attendance.signin_date', '=', 'office_visit.visit_date');
+                        })
+                        ->leftJoin('dept_address', 'dept_address.id', 'office_visit.dept_address_id')
+                        ->where('visit_by', '=', $val->sid)
+                        ->whereMonth('signin_date', $month)
+                        ->whereYear('signin_date', $curr_year)
+                        ->get();
+                }
+            }
+
+            return view('pages.reports.get_attendance_report', compact('staff', 'FilterDate', 'dateArr'));
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('failure', "Database Query Error! [" . $e->getMessage() . " ]");
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', $e->getMessage());
+        }
+    }
+
+
+      public function salary_attendance_pdf(Request $request)
+    {
+        try {
+            // new code for pdf
+            require_once base_path('vendor/autoload.php');
+            $month_filter = $request->month;
+            $quarter_filter = $request->quarter;
+            $year_filter = $request->year;
+
+            $month = date("m", strtotime($month_filter));
+
+            $year = explode('-', $year_filter);
+
+            $start_year = $year[0] . '-04-01';
+            $end_year = $year[1] . '-03-31';
+
+            if ($month > 03) {
+                $curr_year = $year[0];
+            } else {
+                $curr_year = $year[1];
+            }
+            $filter = array();
+            $office_array=['Dhankawadi%411043%','Wakad%411057%','Kharghar%410210%','Thane%400601%','Moshi%411026%'];
+
+            if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                $FilterDate = $month_filter . '/' . $curr_year;
+                $start_date = $curr_year . '-' . $month . '-01';
+                $d = cal_days_in_month(CAL_GREGORIAN, $month, $curr_year);
+                $end_date = $curr_year . '-' . $month . '-' . $d;
+                $filter = array($start_date, $end_date);
+                for ($i = 1; $i <= $d; $i++) {
+                    $day = (strlen($i) == 1) ? '0' . $i : $i; // To add leading zero to the date
+                    $month = (strlen($month) == 1) ? '0' . $month : $month; // To add leading zero to the month
+
+                    $dates[] = $curr_year . '-' . $month . '-' . $day;
+                }
+            } else {
+                return "Please select month filter only";
+            }
+
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->where('users.status', 'active')
+                //->where('staff.sid',7)
+                ->orderBy('staff.sid', 'asc')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get(['sid', 'name']);
+            $ab_arr = array();
+            foreach ($staff as $val) {
+              
+                $sift_end=DB::table('staff_shift')->where('staff_id',$val->sid)->value('to_time');
+                $working_hr=DB::table('staff_shift')->where('staff_id',$val->sid)->value('total_working_hours');
+                $sift_start=DB::table('staff_shift')->where('staff_id',$val->sid)->value('from_time');
+                // $quardter_time=date('h:i A', strtotime($sift . " +2 hours"));
+                // $quardter_time1=date('h:i A', strtotime($to_time . " -2 hours"));
+                // $half_time=date('h:i A', strtotime($sift . " +4 hours"));
+                // $half_time1=date('h:i A', strtotime($to_time . "-4 hours"));
+                //$dates=['2024-04-24'];
+                for ($d = 0; $d < sizeof($dates); $d++) {
+                    
+                    $check = '';
+                    $list[$dates[$d]] = DB::table('attendance')
+                       
+                        ->where('staff_id', $val->sid)
+                        ->where('signin_date', $dates[$d])->orderBy('id', 'desc')->get(['id','signin_date', 'signin_time', 'signout_date', 'signout_time','signin_location','signout_location','signin_address','signout_address']);
+
+
+                    if (
+                        $list[$dates[$d]] != '[]'
+                    ) {
+                        foreach ($list[$dates[$d]] as $row) {
+                            $check_in_ofc='';
+                            $atndnc_id=$row->id;
+                            $check_ofc_status=DB::table('attendance')
+                            ->where(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Dhankawadi%411043%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Wakad%411057%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Kharghar%410210%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Thane%400601%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Moshi%411026%');
+                            })->count();
+                           
+                            if($check_ofc_status==0)
+                            {
+                                $check_in_ofc='OTO';
+                            }
+                           
+                            
+                            $signin_date = $row->signin_date;
+                            $signin_time = $row->signin_time;
+                            $signout_date = $row->signout_date;
+                            $signout_time = $row->signout_time;
+                            $signin_location = $row->signin_location;
+                            $signin_address = $row->signin_address;
+                             $signout_location = $row->signout_location;
+                            $signout_address = $row->signout_address;
+                            $remark='';$sift='';
+                            if ($signout_time == "") {
+                                $total_working_hr = '';
+                                $remark = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $half_hr=$working_hr/2;
+                                $minute = $diff % 60;
+                                $time = $hour . '.' . $minute;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                                
+                                
+                               
+                                if($sift_start=='9:30 AM')
+                                {
+                                    $sift='9:45 AM';
+                                    if($val->sid==1)
+                                    {
+                                        log::info('signin='.$row->signin_time.' siftstatrt='.$sift_start.' sift='.$sift);
+                                    }
+                                    
+                                    
+                                   
+                                    
+                                    if((strtotime($row->signin_time) > strtotime('9:30 AM')) && (strtotime($row->signin_time) <= strtotime('9:45 AM')))
+                                    {
+                                        
+                                        $remark='Late Mark';
+                                    }
+                                  
+                                }
+                                else
+                                {
+                                    $sift=$sift_start;
+                                }
+                                $diff_in_time = intval((strtotime($row->signin_time) - strtotime($sift)) / 60);
+                                $hour_in_time = intval($diff_in_time / 60);
+                                $minute_in_time = $diff_in_time % 60;
+                                $in_time = $hour_in_time . '.' . $minute_in_time;
+
+                                $diff_out_time = intval((strtotime($sift_end) - strtotime($row->signout_time)) / 60);
+                                $hour_out_time = intval($diff_out_time / 60);
+                                $minute_out_time = $diff_out_time % 60;
+                                $out_time = $hour_out_time . '.' . $minute_out_time;
+                            
+                                // if($row->signin_time=='03:06 PM')
+                                // {
+                                //     return $in_time;
+                                // }
+                                if (strtotime($signin_time) > strtotime($sift) && strtotime($row->signout_time) < strtotime($sift_end)) {
+                                  
+                                    $total_time=$out_time+$in_time;
+                                    if($total_time>0 && $total_time<=2)
+                                    {
+                                        $remark='Quarter Day';
+                                    }
+                                    if($total_time>2 && $total_time<=4)
+                                    {
+                                        $remark='Half day';
+                                    }
+                                }
+                            
+                            else {
+                              
+                                if (strtotime($signin_time) > strtotime($sift) || strtotime($row->signout_time) < strtotime($sift_end)) 
+                                {
+                                  
+                                
+                                if(($in_time>0 && $in_time<=2) || ($out_time>0 && $out_time<=2))
+                                {
+                                   
+
+                                    $remark='Quarter Day';
+                                   
+                                }
+                                if(($in_time>2 && $in_time<=4) || ($out_time>2 && $out_time<=4))
+                                {
+                                    
+                                  $remark='Half day';
+                                }
+                                
+                                if(($in_time>4) && ($out_time>4))
+                                {
+                                    
+                                    $remark='Leave';
+                                }
+                                    if(($in_time>4) && ($time>=4))
+                                    {
+                                        
+                                        $remark='half day';
+                                    }
+                                }
+                                
+                                   
+                                } 
+                               
+                            }
+                        }
+                        $val->attendance_list[$dates[$d]] = array(array('signin_date' => $signin_date, 'signin_time' => $signin_time, 'signout_date' => $signout_date, 'signout_time' => $signout_time, 'total_working_hr' => $total_working_hr, 'remark' => $remark,'signin_location'=>$signin_location,'signin_address'=>$signin_address,'signout_location'=>$signout_location,'signout_address'=>$signout_address,'check_ofc_status'=>$check_in_ofc));
+                    } else {
+
+                        $check = DB::table('leave_table')->where('staff_id', $val->sid)->where('start_date', '<=', $dates[$d])->Where('end_date', '>=', $dates[$d])->value('leave_id');
+                        if ($check != '') {
+                            $remark = DB::table('leave_type')->where('id', $check)->value('type');
+                        } else {
+                            $remark = 'leave';
+                        }
+                        $val->attendance_list[$dates[$d]] = array(array('signin_date' => $dates[$d], 'signin_time' => '', 'signout_date' => '', 'signout_time' => '', 'total_working_hr' => '', 'remark' => $remark,'signin_location'=>'','signin_address'=>'','signout_location'=>'','signout_address'=>'','check_ofc_status'=>''));
+                    }
+                }
+            }
+
+            ini_set("pcre.backtrack_limit", "5000000");
+            $mpdf = new \Mpdf\Mpdf(['mode' => 'utf-8', 'format' => 'A4-L', 'orientation' => 'L']);
+
+            $mpdf->SetHeader('<div style="font-size:16px;font-weight:700;">{DATE j-M-Y}</div>');
+            $mpdf->setFooter('<div style="font-size:16px;font-weight:700;">{PAGENO}</div>');
+            $mpdf->SetDisplayMode('fullpage');
+            $mpdf->WriteHTML(view('pages.reports.get_salary_atdnc_report', compact('staff', 'FilterDate', 'dates')));
+            return ($mpdf->Output('Attendance_Report.pdf', 'I'));
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('failure', "Database Query Error! [" . $e->getMessage() . " ]");
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', $e->getMessage());
+        }
+    }
+    public function salary_attendance_print(Request $request)
+    {
+        try {
+            // new code for pdf
+            require_once base_path('vendor/autoload.php');
+                       $month_filter = $request->month;
+            $quarter_filter = $request->quarter;
+            $year_filter = $request->year;
+
+            $month = date("m", strtotime($month_filter));
+
+            $year = explode('-', $year_filter);
+
+            $start_year = $year[0] . '-04-01';
+            $end_year = $year[1] . '-03-31';
+
+            if ($month > 03) {
+                $curr_year = $year[0];
+            } else {
+                $curr_year = $year[1];
+            }
+            $filter = array();
+
+
+
+            if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                $FilterDate = $month_filter . '/' . $curr_year;
+                $start_date = $curr_year . '-' . $month . '-01';
+                $d = cal_days_in_month(CAL_GREGORIAN, $month, $curr_year);
+                $end_date = $curr_year . '-' . $month . '-' . $d;
+                $filter = array($start_date, $end_date);
+                for ($i = 1; $i <= $d; $i++) {
+                    $day = (strlen($i) == 1) ? '0' . $i : $i; // To add leading zero to the date
+                    $month = (strlen($month) == 1) ? '0' . $month : $month; // To add leading zero to the month
+
+                    $dates[] = $curr_year . '-' . $month . '-' . $day;
+                }
+            } else {
+                return "Please select month filter only";
+            }
+
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->where('users.status', 'active')
+
+                ->orderBy('staff.sid', 'asc')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid', $staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get(['sid', 'name']);
+            $ab_arr = array();
+            foreach ($staff as $val) {
+              
+                $sift_end=DB::table('staff_shift')->where('staff_id',$val->sid)->value('to_time');
+                $working_hr=DB::table('staff_shift')->where('staff_id',$val->sid)->value('total_working_hours');
+                $sift_start=DB::table('staff_shift')->where('staff_id',$val->sid)->value('from_time');
+                // $quardter_time=date('h:i A', strtotime($sift . " +2 hours"));
+                // $quardter_time1=date('h:i A', strtotime($to_time . " -2 hours"));
+                // $half_time=date('h:i A', strtotime($sift . " +4 hours"));
+                // $half_time1=date('h:i A', strtotime($to_time . "-4 hours"));
+                
+                for ($d = 0; $d < sizeof($dates); $d++) {
+                    
+                    $check = '';
+                    $list[$dates[$d]] = DB::table('attendance')
+                       
+                        ->where('staff_id', $val->sid)
+                        ->where('signin_date', $dates[$d])->orderBy('signin_date', 'desc')->get(['id','signin_date', 'signin_time', 'signout_date', 'signout_time','signin_location','signout_location','signin_address','signout_address']);
+
+
+                    if (
+                        $list[$dates[$d]] != '[]'
+                    ) {
+                        foreach ($list[$dates[$d]] as $row) {
+                            $check_in_ofc='';
+                            $atndnc_id=$row->id;
+                            if($row->signin_address!=='')
+                            {
+                                $check_ofc_status=DB::table('attendance')
+                                ->where(function ($query) use ($atndnc_id) {
+                                    $query->where('id',$atndnc_id);
+                                    $query->Where('signin_address','LIKE','Dhankawadi%411043%');
+                                })->orWhere(function ($query) use ($atndnc_id) {
+                                    $query->where('id',$atndnc_id);
+                                    $query->Where('signin_address','LIKE','Wakad%411057%');
+                                })->orWhere(function ($query) use ($atndnc_id) {
+                                    $query->where('id',$atndnc_id);
+                                    $query->Where('signin_address','LIKE','Kharghar%410210%');
+                                })->orWhere(function ($query) use ($atndnc_id) {
+                                    $query->where('id',$atndnc_id);
+                                    $query->Where('signin_address','LIKE','Thane%400601%');
+                                })->orWhere(function ($query) use ($atndnc_id) {
+                                    $query->where('id',$atndnc_id);
+                                    $query->Where('signin_address','LIKE','Moshi%411026%');
+                                })->count();
+                               
+                            }
+                           
+                            if($check_ofc_status==0)
+                            {
+                                $check_in_ofc='OTO';
+                            }
+                           
+                            $signin_date = $row->signin_date;
+                            $signin_time = $row->signin_time;
+                            $signout_date = $row->signout_date;
+                            $signout_time = $row->signout_time;
+                            $signin_location = $row->signin_location;
+                            $signin_address = $row->signin_address;
+                             $signout_location = $row->signout_location;
+                            $signout_address = $row->signout_address;
+                            $remark='';$sift='';
+                            if ($signout_time == "") {
+                                $total_working_hr = '';
+                                $remark = "Not Marked";
+                            } else {
+                                $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                                $hour = intval($diff / 60);
+                                $half_hr=$working_hr/2;
+                                $minute = $diff % 60;
+                                $time = $hour . '.' . $minute;
+                                $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                                
+                                
+                               
+                                if($sift_start=='9:30 AM')
+                                {
+                                    $sift='9:45 AM';
+                                    if($val->sid==1)
+                                    {
+                                        log::info('signin='.$row->signin_time.' siftstatrt='.$sift_start.' sift='.$sift);
+                                    }
+                                    
+                                    
+                                   
+                                    
+                                    if((strtotime($row->signin_time) > strtotime('9:30 AM')) && (strtotime($row->signin_time) <= strtotime('9:45 AM')))
+                                    {
+                                        
+                                        $remark='Late Mark';
+                                    }
+                                  
+                                }
+                                else
+                                {
+                                    $sift=$sift_start;
+                                }
+                                $diff_in_time = intval((strtotime($row->signin_time) - strtotime($sift)) / 60);
+                                $hour_in_time = intval($diff_in_time / 60);
+                                $minute_in_time = $diff_in_time % 60;
+                                $in_time = $hour_in_time . '.' . $minute_in_time;
+
+                                $diff_out_time = intval((strtotime($sift_end) - strtotime($row->signout_time)) / 60);
+                                $hour_out_time = intval($diff_out_time / 60);
+                                $minute_out_time = $diff_out_time % 60;
+                                $out_time = $hour_out_time . '.' . $minute_out_time;
+                                // if($row->signin_time=='03:06 PM')
+                                // {
+                                //     return $in_time;
+                                // }
+                                if (strtotime($signin_time) > strtotime($sift) && strtotime($row->signout_time) < strtotime($sift_end)) {
+                                    
+                                    $total_time=$out_time+$in_time;
+                                    if($total_time>0 && $total_time<=2)
+                                    {
+                                        $remark='Quarter Day';
+                                    }
+                                    if($total_time>2 && $total_time<=4)
+                                    {
+                                        $remark='Half day';
+                                    }
+                                }
+                            
+                           else {
+                              
+                                if (strtotime($signin_time) > strtotime($sift) || strtotime($row->signout_time) < strtotime($sift_end)) 
+                                {
+                                  
+                                
+                                if(($in_time>0 && $in_time<=2) || ($out_time>0 && $out_time<=2))
+                                {
+                                   
+
+                                    $remark='Quarter Day';
+                                   
+                                }
+                                if(($in_time>2 && $in_time<=4) || ($out_time>2 && $out_time<=4))
+                                {
+                                    
+                                  $remark='Half day';
+                                }
+                                
+                                if(($in_time>4) && ($out_time>4))
+                                {
+                                    
+                                    $remark='Leave';
+                                }
+                                    if(($in_time>4) && ($time>=4))
+                                    {
+                                        
+                                        $remark='half day';
+                                    }
+                                }
+                                
+                                   
+                                } 
+                               
+                            }
+                        }
+                        $val->attendance_list[$dates[$d]] = array(array('signin_date' => $signin_date, 'signin_time' => $signin_time, 'signout_date' => $signout_date, 'signout_time' => $signout_time, 'total_working_hr' => $total_working_hr, 'remark' => $remark,'signin_location'=>$signin_location,'signin_address'=>$signin_address,'signout_location'=>$signout_location,'signout_address'=>$signout_address,'check_ofc_status'=>$check_in_ofc));
+                    } else {
+
+                        $check = DB::table('leave_table')->where('staff_id', $val->sid)->where('start_date', '<=', $dates[$d])->Where('end_date', '>=', $dates[$d])->value('leave_id');
+                        if ($check != '') {
+                            $remark = DB::table('leave_type')->where('id', $check)->value('type');
+                        } else {
+                            $remark = 'leave';
+                        }
+                        $val->attendance_list[$dates[$d]] = array(array('signin_date' => $dates[$d], 'signin_time' => '', 'signout_date' => '', 'signout_time' => '', 'total_working_hr' => '', 'remark' => $remark,'signin_location'=>'','signin_address'=>'','signout_location'=>'','signout_address'=>'','check_ofc_status'=>$check_in_ofc));
+                    }
+                }
+            }
+
+            return view('pages.reports.get_salary_atdnc_report', compact('staff', 'FilterDate', 'dates'));
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('failure', "Database Query Error! [" . $e->getMessage() . " ]");
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', $e->getMessage());
+        }
+    }
+     public function salary_attendance_excel(Request $request)
+    {
+        $month_filter = $request->month;
+        $quarter_filter = $request->quarter;
+        $year_filter = $request->year;
+
+        $month = date("m", strtotime($month_filter));
+
+        $year = explode('-', $year_filter);
+
+        if ($month > 03) {
+            $curr_year = $year[0];
+        } else {
+            $curr_year = $year[1];
+        }
+        $filter = array();
+
+        if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+            $FilterDate = $month_filter . '/' . $curr_year;
+            $start_date = $curr_year . '-' . $month . '-01';
+            $d = cal_days_in_month(CAL_GREGORIAN, $month, $curr_year);
+            $end_date = $curr_year . '-' . $month . '-' . $d;
+            $filter = array($start_date, $end_date);
+            for ($i = 1; $i <= $d; $i++) {
+                $day = (strlen($i) == 1) ? '0' . $i : $i; // To add leading zero to the date
+                $month = (strlen($month) == 1) ? '0' . $month : $month; // To add leading zero to the month
+
+                $dates[] = $curr_year . '-' . $month . '-' . $day;
+            }
+        } else {
+            return "Please select month filter only";
+        }
+
+        $staff1 = DB::table('staff')
+            ->join('users', 'users.user_id', 'staff.sid')
+            ->where('users.status', 'active')
+            ->orderBy('staff.sid', 'asc')->get();
+
+        $staff_id = array();
+        foreach ($staff1 as $stf) {
+            $company = json_decode($stf->company);
+            for ($i = 0; $i < sizeof($company); $i++) {
+                if ($company[$i] == session('company_id')) {
+                    $staff_id[] = $stf->sid;
+                }
+            }
+        }
+
+        $staff = DB::table('staff')
+            ->join('users', 'users.user_id', 'staff.sid')
+            ->where('users.status', 'active')
+            ->whereIn('staff.sid', $staff_id)
+            ->orderBy('staff.sid', 'asc')
+            ->get(['sid', 'name']);
+        $ab_arr = array();
+        $out1 = '';
+        $export_data = "Attendance Report -\n";
+
+        foreach ($staff as $val) {
+            // if ($val->sid == 2) {
+            //     $sift = '10:30 AM';
+            // } else if ($val->sid == 38) {
+            //     $sift = '11:30 AM';
+            // } else if ($val->sid == 37) {
+            //     $sift = '11:00 AM';
+            // } else {
+            //     $sift = '10:00 AM';
+            // }
+            $sift_end = DB::table('staff_shift')->where('staff_id', $val->sid)->value('to_time');
+            $working_hr = DB::table('staff_shift')->where('staff_id', $val->sid)->value('total_working_hours');
+            $sift_start = DB::table('staff_shift')->where('staff_id', $val->sid)->value('from_time');
+            $a = 1;
+            $export_data .= "\n";
+            $export_data .= "Staff -" . $val->name . ":\n";
+            $export_data .= "\n";
+            $export_data .= "Sr. No.\tSign In Date\tSign In Time\tSign In Location\tSign In Address\tSign Out Date\tSign Out Time\tSign Out Location\tSign Out Address\tTotal Working hr\tFrom\tremark\n";
+            for ($d = 0; $d < sizeof($dates); $d++) {
+                $check = '';
+
+                $list[$dates[$d]] = DB::table('attendance')
+                   
+                    ->where('staff_id', $val->sid)
+                    ->where('signin_date', $dates[$d])
+                    ->orderBy('signin_date', 'desc')
+                    ->get(['id','signin_date', 'signin_time', 'signout_date', 'signout_time', 'signin_location', 'signout_location', 'signin_address', 'signout_address',]);
+
+                if ($list[$dates[$d]] != '[]') {
+                    foreach ($list[$dates[$d]] as $row) {
+                         $check_in_ofc='';
+                            $atndnc_id=$row->id;
+                            $check_ofc_status=DB::table('attendance')
+                            ->where(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Dhankawadi%411043%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Wakad%411057%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Kharghar%410210%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Thane%400601%');
+                            })->orWhere(function ($query) use ($atndnc_id) {
+                                $query->where('id',$atndnc_id);
+                                $query->Where('signin_address','LIKE','Moshi%411026%');
+                            })->count();
+                        $signin_date = $row->signin_date;
+                        $signin_time = $row->signin_time;
+                        $signout_date = $row->signout_date;
+                        $signout_time = $row->signout_time;
+                        $signin_location = $row->signin_location;
+                        $signin_address = $row->signin_address;
+                        $signout_location = $row->signout_location;
+                        $signout_address = $row->signout_address;
+                        $remark = '';
+                        $sift = '';
+                        if ($signout_time == "") {
+                            $row->total_working_hr = '';
+                            $remark = "Not Marked";
+                        } else {
+                            $diff = intval((strtotime($row->signout_time) - strtotime($row->signin_time)) / 60);
+                            $hour = intval($diff / 60);
+                            // $half_hr = $working_hr / 2;
+                            $minute = $diff % 60;
+                            $time = $hour . '.' . $minute;
+                            $total_working_hr = $hour . ' hr ' . $minute . ' min';
+                            if ($sift_start == '9:30 AM') {
+                                $sift = '9:45 AM';
+                                if ($val->sid == 1) {
+                                    log::info('signin=' . $row->signin_time . ' siftstatrt=' . $sift_start . ' sift=' . $sift);
+                                }
+
+
+
+
+                                if ((strtotime($row->signin_time) > strtotime('9:30 AM')) && (strtotime($row->signin_time) <= strtotime('9:45 AM'))) {
+
+                                    $remark = 'Late Mark';
+                                }
+                            } else {
+                                $sift = $sift_start;
+                            }
+                            $diff_in_time = intval((strtotime($row->signin_time) - strtotime($sift)) / 60);
+                            $hour_in_time = intval($diff_in_time / 60);
+                            $minute_in_time = $diff_in_time % 60;
+                            $in_time = $hour_in_time . '.' . $minute_in_time;
+
+                            $diff_out_time = intval((strtotime($sift_end) - strtotime($row->signout_time)) / 60);
+                            $hour_out_time = intval($diff_out_time / 60);
+                            $minute_out_time = $diff_out_time % 60;
+                            $out_time = $hour_out_time . '.' . $minute_out_time;
+                            // if ($time < 8.30) {
+
+                            //     $remark = 'Half day';
+                            // } else if (strtotime($signin_time) > strtotime($sift)) {
+                            //     $remark = 'Late Mark';
+                            // } else {
+                            //     $remark = '';
+                            // }
+                            if (strtotime($signin_time) > strtotime($sift) && strtotime($row->signout_time) < strtotime($sift_end)) {
+
+                                $total_time = $out_time + $in_time;
+                                if ($total_time > 0 && $total_time <= 2) {
+                                    $remark = 'Quarter Day';
+                                }
+                                if ($total_time > 2 && $total_time <= 4) {
+                                    $remark = 'Half day';
+                                }
+                            }  else {
+                              
+                                if (strtotime($signin_time) > strtotime($sift) || strtotime($row->signout_time) < strtotime($sift_end)) 
+                                {
+                                  
+                                
+                                if(($in_time>0 && $in_time<=2) || ($out_time>0 && $out_time<=2))
+                                {
+                                   
+
+                                    $remark='Quarter Day';
+                                   
+                                }
+                                if(($in_time>2 && $in_time<=4) || ($out_time>2 && $out_time<=4))
+                                {
+                                    
+                                  $remark='Half day';
+                                }
+                                
+                                if(($in_time>4) && ($out_time>4))
+                                {
+                                    
+                                    $remark='Leave';
+                                }
+                                    if(($in_time>4) && ($time>=4))
+                                    {
+                                        
+                                        $remark='half day';
+                                    }
+                                }
+                                
+                                   
+                                } 
+                        }
+                    }
+                    $val->attendance_list[$dates[$d]] = array(array('signin_date' => $signin_date, 'signin_time' => $signin_time, 'signout_date' => $signout_date, 'signout_time' => $signout_time, 'total_working_hr' => $total_working_hr, 'remark' => $remark, 'signin_location' => $signin_location, 'signin_address' => $signin_address, 'signout_location' => $signout_location, 'signout_address' => $signout_address,'check_ofc_status'=>$check_ofc_status));
+                    $lineData = array($a++, $signin_date, $signin_time, $signin_location, $signin_address, $signout_date, $signout_time, $signout_location, $signout_address, $total_working_hr, $remark,$check_ofc_status,);
+                    $export_data .= implode("\t", array_values($lineData)) . "\n";
+                    $export_data .= "\n";
+                    $export_data .= "\n";
+                } else {
+
+                    $check = DB::table('leave_table')->where('staff_id', $val->sid)->where('start_date', '<=', $dates[$d])->Where('end_date', '>=', $dates[$d])->value('leave_id');
+                    if ($check != '') {
+                        $remark = DB::table('leave_type')->where('id', $check)->value('type');
+                    } else {
+                        $remark = 'leave';
+                    }
+
+                    $val->attendance_list[$dates[$d]] = array(array('signin_date' => $dates[$d], 'signin_time' => '', 'signout_date' => '', 'signout_time' => '', 'total_working_hr' => '', 'remark' => $remark, 'signin_location' => '', 'signin_address' => '', 'signout_location' => '', 'signout_address' => '','check_ofc_status'=>''));
+                    $lineData = array($a++, $dates[$d], '', '', '', '', '', '', '', '', $remark);
+                    $export_data .= implode("\t", array_values($lineData)) . "\n";
+                    $export_data .= "\n";
+                }
+            }
+        }
+        $out1 .= $export_data;
+
+        return response($out1)
+            ->header("Content-Type", "application/vnd.ms-excel")
+            ->header("Content-Disposition", "attachment;filename=\"Salary_attendance_Report.xls\"");
+    }
+      public function staff_work_pdf(Request $request)
+    {
+        try {
+           
+            // new code for pdf
+            require_once base_path('vendor/autoload.php');
+            $month_filter = $request->month;
+            $quarter_filter = $request->quarter;
+            $year_filter = $request->year;
+
+            $month = date("m", strtotime($month_filter));
+
+            $year = explode('-', $year_filter);
+
+            $start_year = $year[0] . '-04-01';
+            $end_year = $year[1] . '-03-31';
+
+            if ($month > 03) {
+                $curr_year = $year[0];
+            } else {
+                $curr_year = $year[1];
+            }
+            $filter = array();
+           
+
+            if ($month_filter != 'none' && $year_filter != 'none' && $quarter_filter == 'none') {
+                $FilterDate = $month_filter . '/' . $curr_year;
+                $start_date = $curr_year . '-' . $month . '-01';
+                $d = cal_days_in_month(CAL_GREGORIAN, $month, $curr_year);
+                $end_date = $curr_year . '-' . $month . '-' . $d;
+                $filter = array($start_date, $end_date);
+                for ($i = 1; $i <= $d; $i++) {
+                    $day = (strlen($i) == 1) ? '0' . $i : $i; // To add leading zero to the date
+                    $month = (strlen($month) == 1) ? '0' . $month : $month; // To add leading zero to the month
+
+                    $dates[] = $curr_year . '-' . $month . '-' . $day;
+                }
+            } else {
+                return "Please select month filter only";
+            }
+            
+
+            $staff1 = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->select('staff.*','users.role_id')
+                ->where('users.status', 'active')
+                ->orderBy('staff.sid', 'asc')->get();
+
+            $staff_id = array();
+            foreach ($staff1 as $stf) {
+                $company = json_decode($stf->company);
+                for ($i = 0; $i < sizeof($company); $i++) {
+
+                    if ($company[$i] == session('company_id')) {
+                        $staff_id[] = $stf->sid;
+                    }
+                }
+            }
+
+            $staff = DB::table('staff')
+                ->join('users', 'users.user_id', 'staff.sid')
+                ->where('users.status', 'active')
+                ->whereIn('staff.sid',$staff_id)
+                ->orderBy('staff.sid', 'asc')
+                ->get(['sid', 'name','users.role_id']);
+                $ab_arr = array();
+            foreach ($staff as $val) {
+              for ($d = 0; $d < sizeof($dates); $d++) {
+                    $check = '';$staff_id=$val->sid;$date=$dates[$d];
+                    $data = DB::table('task_logs')->where(function ($query) use ($staff_id,$date) {
+                    $query->whereDate('created_at',$date);
+                    $query->whereJsonContains('assignee', (string)$staff_id);
+                    $query->WhereNull('updated_by');
+                })->orWhere(function ($query) use ($staff_id,$date)  {
+                    $query->whereDate('created_at',$date);
+                    $query->Where('updated_by',$staff_id);
+                })->get();
+
+                if ($data != '[]') 
+                    {
+                        $total_task=sizeof($data);
+                       $total_appointment=0; $total_assigned=0;$total_updated=0;$total_completed=0;$total_hearing=0;$total_checkin=0;$total_followup_call=0;$total_followup_visit=0;
+                        foreach ($data as $row) 
+                        {
+                            
+                            if($row->created_by!='')
+                            {
+                                $total_assigned+=1;
+                            }
+                            if($row->updated_by!='')
+                            {
+                                $total_updated+=1;
+                            }
+                            if($row->status==5)
+                            {
+                                $total_completed+=1;
+                            }
+                            if($row->type==4)
+                            {
+                                $total_hearing+=1;
+                            }
+                            $total_followup_call=DB::table('follow_up')->where('followup_date',$date)->where('contact_by',$val->sid)->where('method','call')->count();
+                            $total_followup_visit=DB::table('follow_up')->where('followup_date',$date)->where('contact_by',$val->sid)->where('method','visit')->count();
+                            if($val->role_id==8)
+                            {
+                                $total_checkin=DB::table('office_visit')->where('visit_by',$val->sid)->where('visit_date',$date)->whereNull('client_id')->count();
+                            }
+                            
+                        }
+                    $total_appointment=DB::table('appointment')->where('meeting_date',$date)->where('meeting_with',$staff_id)->count();
+                    $val->tasks[$dates[$d]]=['total_task'=>$total_task,'total_assigned'=>$total_assigned,'total_updated'=>$total_updated,'total_completed'=>$total_completed,'total_followup_call'=>$total_followup_call,'total_followup_visit'=>$total_followup_visit,'total_checkin'=>$total_checkin,'total_appointment'=>$total_appointment];
+                        
+                    } 
+               else 
+                    {
+                        log::info('d='.$d.' '.$dates[$d]);
+                        $val->tasks[$dates[$d]]=['total_task'=>0,'total_assigned'=>0,'total_updated'=>0,'total_completed'=>0,'total_followup_call'=>0,'total_followup_visit'=>0,'total_checkin'=>0,'total_appointment'=>0];
+                    }
+                }
+            }
+            
+            ini_set("pcre.backtrack_limit", "5000000");
+            $mpdf = new \Mpdf\Mpdf(['mode' => 'utf-8', 'format' => 'A4-L', 'orientation' => 'L']);
+
+            $mpdf->SetHeader('<div style="font-size:16px;font-weight:700;">{DATE j-M-Y}</div>');
+            $mpdf->setFooter('<div style="font-size:16px;font-weight:700;">{PAGENO}</div>');
+            $mpdf->SetDisplayMode('fullpage');
+            $mpdf->WriteHTML(view('pages.reports.get_staff_work_detail', compact('staff', 'FilterDate', 'dates')));
+            return ($mpdf->Output('Attendance_Report.pdf', 'I'));
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('failure', "Database Query Error! [" . $e->getMessage() . " ]");
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', $e->getMessage());
+        }
+    }
+}

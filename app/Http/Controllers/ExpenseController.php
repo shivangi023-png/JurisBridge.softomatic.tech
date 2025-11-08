@@ -1,0 +1,3171 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Traits\ExpenseTraits;
+use App\Traits\StaffTraits;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
+use Carbon\Carbon;
+use App\Traits\ClientTraits;
+
+class ExpenseController extends Controller
+{
+  use ExpenseTraits;
+  use StaffTraits;
+  use ClientTraits;
+  public function expenses_list()
+  {
+    $staff = $this->get_staff_list_userid();
+    $session = DB::table('session')->where('status', 'open')->get();
+    $session_array = array();
+    foreach ($session as $ses) {
+      $session1 = explode('-', $ses->session);
+      for ($i = 0; $i < sizeof($session1); $i++) {
+        $session_array[] = $session1[$i];
+      }
+    }
+
+    $first = $session_array[0];
+    $last = $session_array[sizeof($session_array) - 1];
+    $first_dt = $first . '-' . '04-' . '01';
+    $last_dt = $last . '-' . '03-' . '31';
+    $staff = $this->get_staff_list_userid();
+    $expense = $this->open_expenses($first_dt, $last_dt);
+    foreach ($expense as $row) {
+      $row->client_case_no = $this->get_client_case_no_by_id($row->client_id);
+    }
+    return view('pages.expenses_entry', compact('expense', 'staff'));
+  }
+
+  public function expenses_add(Request $request)
+  {
+    $client_id = $request->id;
+    if ($client_id == '') {
+      $client_id = '';
+    }
+    $sub_heads = DB::table('accounting_sub_heads')
+      ->join('accounting_heads', 'accounting_heads.id', 'accounting_sub_heads.heads_id')
+      ->select('accounting_heads.id as head_id', 'accounting_sub_heads.id as subhead_id', 'accounting_sub_heads.sub_heads')
+      ->get();
+    $clients = DB::table('clients')->get();
+    $accounting_heads = DB::table('accounting_heads')->get();
+    $accounting_sub_heads = DB::table('accounting_sub_heads')->get();
+
+    $staff = $this->get_staff_list_userid();
+    return view('pages.expenses_add', compact('client_id', 'clients', 'accounting_heads', 'accounting_sub_heads', 'staff', 'sub_heads'));
+  }
+  public function get_ledger()
+  {
+    $sub_heads = DB::table('accounting_sub_heads')
+      ->join('accounting_heads', 'accounting_heads.id', 'accounting_sub_heads.heads_id')
+      ->select('accounting_heads.id as head_id', 'accounting_sub_heads.id as subhead_id', 'accounting_sub_heads.sub_heads')
+      ->get();
+    return json_encode(array('status' => 'success', 'ledger' => $sub_heads));
+  }
+  public function expense_entry(Request $request)
+  {
+    try {
+
+      $client = $request->client;
+      $ledger = $request->ledger;
+      $var = $request->date;
+      $date = str_replace('/', '-', $var);
+      $date = date('Y-m-d', strtotime($date));
+      $amount = $request->amount;
+      $mode_of_payment = $request->mode_of_payment;
+      $ref_no = $request->ref_no;
+      $bank_name = $request->bank_name;
+      $cheque_no = $request->chq_no;
+      if ($request->wantsJson()) {
+        $company = $request->company;
+      } else {
+        $company = session('company_id');
+      }
+      $self = $request->reimburse;
+      $invoice = $request->invoice;
+      if ($self == "") {
+        $self = "no";
+      }
+
+      $by_whom = $request->by_whom;
+      if ($request->wantsJson()) {
+        $remarks = $request->remarks;
+      } else {
+        $remarks = $request->remarks;
+        if ($request->selected_company != session('company_id')) {
+          return json_encode(array('status' => 'error', 'msg' => 'selected company and current page company are not same'));
+        }
+      }
+      $status = 'open';
+      $file = $request->invoice;
+
+
+      if ($request->has('invoice') || $file != '') {
+        if ($request->wantsJson()) {
+          $target_dir = 'all_doc/expense_bill/';
+          $extension = explode('.', $request->filename)[1];
+          $file_name = explode('.', $request->filename)[0];
+
+          $expense_id = DB::table('expense')->max('id') + 1;
+          $filename = $file_name . '-' . $expense_id . '_' . strtotime(date('Y-m-d H:i:s')) . '.' . $extension;
+          $target_file = $target_dir . $filename;
+
+          //   // $output_file = base_path().'/all_doc/complaint_file/'.$filename.'_'.strtotime(date('Y-m-d H:i:s')).'.'.$extension;
+          //   $output_file = base_path() . '/' . $target_file;
+          //   $file = fopen($output_file, "wb");
+          //   $bill = $target_file;
+          $foldername = 'expense_file';
+
+
+
+          $path = $foldername . '/' . $filename;
+
+          Storage::disk('s3_quotations')->put($path, base64_decode($file), 'public');
+          $target_file = Storage::disk('s3_quotations')->url($path);
+          // $data = explode(',', $request->complaint_file);
+          if ($target_file) {
+            $bill = $target_file;
+          } else {
+            if ($request->wantsJson()) {
+              $response = array();
+              $response['status'] = 'failure';
+              $response['msg'] = config('global.file_upload_err');
+              return response()->json($response);
+            }
+          }
+        } else {
+          Log::info("Upload invoice " . $file);
+          $target_dir = 'all_doc/expense_bill/';
+          $filename = strtolower($file->getClientOriginalName());
+          $extension = strtolower($file->getClientOriginalExtension());
+          $file_name = pathinfo($filename, PATHINFO_FILENAME);
+          $expense_id = DB::table('expense')->max('id') + 1;
+          $filename = $file_name . '-' . $expense_id . '_' . strtotime(date('Y-m-d H:i:s')) . '.' . $extension;
+          $foldername = 'expense_file';
+
+
+
+          $path = $foldername . '/' . $filename;
+
+          Storage::disk('s3_quotations')->put($path, fopen($request->file('invoice'), 'r+'), 'public');
+          $target_file = Storage::disk('s3_quotations')->url($path);
+
+          if ($target_file) {
+
+            $bill = $target_file;
+          } else {
+            Log::error("File Can't be uploaded");
+            return json_encode(array('status' => 'error', 'msg' => 'File Can`t be uploaded'));
+          }
+        }
+      } else {
+        Log::error("attachment not available");
+        $bill = '';
+      }
+      $insert = DB::table('expense')->insert([
+        'client_id'  => $client,
+        'ledger' =>  $ledger,
+        'mode_of_payment' =>  $mode_of_payment,
+        'date'  => $date,
+        'amount' =>  $amount,
+        'ref_no' => $ref_no,
+        'cheque_no'  => $cheque_no,
+        'bank_name'  => $bank_name,
+        'by_whom'  => $by_whom,
+        'status' =>  $status,
+        'bill'  => $bill,
+        'self' => $self,
+        'company' => $company,
+        'remarks' => $remarks,
+        'created_at' => now()
+
+      ]);
+
+      if ($insert) {
+        return json_encode(array('status' => 'success', 'msg' => 'Expense entry done successfully'));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Expense entry can`t done'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function expenses_edit_index($id)
+  {
+    $sub_heads = DB::table('accounting_sub_heads')
+      ->join('accounting_heads', 'accounting_heads.id', 'accounting_sub_heads.heads_id')
+      ->select('accounting_heads.id as head_id', 'accounting_sub_heads.id as subhead_id', 'accounting_sub_heads.sub_heads')
+      ->get();
+    $clients = DB::table('clients')->get();
+    $accounting_heads = DB::table('accounting_heads')->get();
+    $accounting_sub_heads = DB::table('accounting_sub_heads')->get();
+
+    $staff = $this->get_staff_list_userid();
+
+    $expenses = DB::table('expense')
+      ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+      ->select('expense.*', 'accounting_sub_heads.sub_heads')->orderby('expense.id', 'desc')
+      ->where('expense.id', $id)->get();
+    foreach ($expenses as $row) {
+      $client_name = DB::table('clients')->where('id', $row->client_id)->value('client_name');
+      $row->case_no = DB::table('clients')->where('id', $row->client_id)->value('case_no');
+      $staff_name = DB::table('staff')->where('sid', $row->by_whom)->value('name');
+      $approved_by_name = DB::table('staff')->where('sid', $row->approved_by)->value('name');
+      $row->client_name = $client_name;
+      $row->entry_by = $staff_name;
+      $row->approved_by_name = $approved_by_name;
+    }
+
+    return view('pages.expenses_edit', compact("sub_heads", "clients", "accounting_heads", "accounting_sub_heads", "staff", 'expenses'));
+  }
+
+  public function update_expenses(Request $request)
+  {
+    try {
+
+      $expense_id = $request->expense_id;
+      $client = $request->client;
+      $ledger = $request->ledger;
+      $var = $request->date;
+      $date = str_replace('/', '-', $var);
+      $date = date('Y-m-d', strtotime($date));
+      $amount = $request->amount;
+      $mode_of_payment = $request->mode_of_payment;
+      $ref_no = $request->ref_no;
+      $bank_name = $request->bank_name;
+      $cheque_no = $request->chq_no;
+      $self = $request->reimburse;
+      $invoice = $request->invoice;
+      if ($self == "") {
+        $self = "no";
+      }
+
+      $by_whom = $request->by_whom;
+      $status = 'open';
+      $file = $request->invoice;
+      if ($request->wantsJson()) {
+        $remarks = $request->remarks;
+      } else {
+        $remarks = $request->remarks;
+      }
+      if ($request->has('invoice') || $file != '') {
+        if ($request->wantsJson()) {
+          $target_dir = 'all_doc/expense_bill/';
+          $extension = explode('.', $request->filename)[1];
+          $file_name = explode('.', $request->filename)[0];
+          //   $expense_id = DB::table('expense')->max('id') + 1;
+          $filename = $file_name . '-' . $expense_id . '_' . strtotime(date('Y-m-d H:i:s')) . '.' . $extension;
+          $target_file = $target_dir . $filename;
+
+          // $output_file = base_path().'/all_doc/complaint_file/'.$filename.'_'.strtotime(date('Y-m-d H:i:s')).'.'.$extension;
+
+          $foldername = 'expense_file';
+
+
+
+          $path = $foldername . '/' . $filename;
+
+          Storage::disk('s3_quotations')->put($path, base64_decode($invoice), 'public');
+          $target_file = Storage::disk('s3_quotations')->url($path);
+          // $data = explode(',', $request->complaint_file);
+          if ($target_file) {
+            $bill = $target_file;
+          } else {
+
+            $response = array();
+            $response['status'] = 'failure';
+            $response['msg'] = config('global.file_upload_err');
+            return response()->json($response);
+          }
+        } else {
+          Log::info("Upload invoice " . $file);
+          $target_dir = 'all_doc/expense_bill/';
+          $filename = strtolower($file->getClientOriginalName());
+          $extension = strtolower($file->getClientOriginalExtension());
+          $file_name = pathinfo($filename, PATHINFO_FILENAME);
+          //$expense_id = DB::table('expense')->max('id') + 1;
+          $filename = $file_name . '-' . $expense_id . '_' . strtotime(date('Y-m-d H:i:s')) . '.' . $extension;
+          $foldername = 'expense_file';
+
+
+
+          $path = $foldername . '/' . $filename;
+
+          Storage::disk('s3_quotations')->put($path, fopen($request->file('invoice'), 'r+'), 'public');
+          $target_file = Storage::disk('s3_quotations')->url($path);
+
+          if ($target_file) {
+
+
+            $bill = $target_file;
+            log::info($bill);
+          } else {
+            Log::error("File Can't be uploaded");
+            return json_encode(array('status' => 'error', 'msg' => 'File Can`t be uploaded'));
+          }
+        }
+      } else {
+        Log::error("attachment not available");
+        $bill = DB::table('expense')->where('id', $expense_id)->value('bill');
+      }
+
+      $update = DB::table('expense')->where('id', $expense_id)->update([
+        'client_id'  => $client,
+        'ledger' => $ledger,
+        'mode_of_payment' => $mode_of_payment,
+        'date'  => $date,
+        'amount' => $amount,
+        'ref_no' => $ref_no,
+        'cheque_no'  => $cheque_no,
+        'bank_name'  => $bank_name,
+        'by_whom'  => $by_whom,
+        'status' => $status,
+        'bill'  => $bill,
+        'self' => $self,
+        'remarks' => $remarks,
+        'updated_at' => now()
+      ]);
+
+      if ($update) {
+        return json_encode(array('status' => 'success', 'msg' => 'Expense entry updated successfully'));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Expense entry can`t update'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+
+  public function get_filter_expense(Request $request)
+  {
+
+    try {
+      $type = $request->value;
+      log::info($type);
+      $session = DB::table('session')->where('status', 'open')->get();
+      $session_array = array();
+      foreach ($session as $ses) {
+        $session1 = explode('-', $ses->session);
+        for ($i = 0; $i < sizeof($session1); $i++) {
+          $session_array[] = $session1[$i];
+        }
+      }
+
+      $first = $session_array[0];
+      $last = $session_array[sizeof($session_array) - 1];
+      $first_dt = $first . '-' . '04-' . '01';
+      $last_dt = $last . '-' . '03-' . '31';
+      if ($type == 'open') {
+        $expense = $this->open_expenses($first_dt, $last_dt);
+      } else if ($type == 'approved') {
+        $expense = $this->approved_expenses($first_dt, $last_dt);
+      }
+
+      if ($expense) {
+        $staff = $this->get_staff_list_userid();
+        $out = ' ';
+        $out .= '<div class="action-dropdown-btn d-none">
+            <div class="dropdown expense-filter-action">
+                <button class="btn border dropdown-toggle mr-1" type="button" id="expense-filter-btn"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <span class="selection">OPEN</span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-filter-btn">
+                    <a type="button" class="dropdown-item active_btn" data-value="open">Open</a>
+                    <a type="button" class="dropdown-item active_btn" data-value="approved">Approved</a>
+                    <!--<a type="button" class="dropdown-item active_btn" data-value="reimbursed">Reimbursed</a>-->
+                </div>
+            </div>
+            
+            <div class="dropdown expense-options">
+                <button class="btn border dropdown-toggle mr-2" type="button" id="expense-options-btn"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    Options
+                </button>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-options-btn">
+                    <a class="dropdown-item" href="javascript:;">Delete</a>
+                    <a class="dropdown-item" href="javascript:;">Approve</a>
+                </div>
+            </div>';
+        if ($type == 'approved') {
+          $out .= '<div class="dropdown expense-filter-action">
+                  <button class="btn border dropdown-toggle mr-1" type="button" id="expense-approved-filter-btn"
+                      data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                      <span class="selection1">Filter</span>
+                  </button>
+                  <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-approved-filter-btn">
+                      <a type="button" href="javascript:void(0);" class="dropdown-item filter_approve_btn"
+                          data-value="today">Today</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="next_day">Next
+                          Day</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_week">This
+                          Week</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_month">This Month</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_year">This
+                          Year</a>
+                  </div>
+              </div>';
+        }
+
+        $out .= '<div class="dropdown expense-options">
+                <a href="' . asset('expenses_add') . '" class="expense-action-view mr-1">
+                    <button type="button" id="create_expenses" class="btn mr-2 btn-icon btn-outline-primary">Add
+                        Expenses</button>
+                </a>
+            </div>
+        </div>
+
+
+        
+        <input type="hidden" id="expense_filter" value="' . $type . '">
+            
+                <div class="table-responsive">
+                    <table class="table  expense-data-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th>Action</th>
+                                <th></th>
+                                <th>
+                                    <span class="align-middle">Expenses#</span>
+                                </th>
+                                <th>Client</th>
+                                <th>Entry By</th>
+                                <th>Ledger</th>
+                                <th>Amount</th>
+                                <th>Bill</th>
+                                <th>Date</th>
+                                <th>Mode of payment</th>
+                                <th>Reference No</th>
+                                
+                                <th>Reimbursement</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                                      <th>Approval By</th>';
+        }
+        $out .= '</tr>
+                        </thead>
+
+                        <tbody>';
+        foreach ($expense as $row) {
+          $row->client_case_no = $this->get_client_case_no_by_id($row->client_id);
+          $out .= '<tr>
+                                        <td></td>
+                                        <td></td>
+                                        <td><input type="hidden" class="form-control expense_id" value="' . $row->id . '"></td>
+                                        <td>
+                                            <div class="row expense-action">';
+          if ($row->status != 'approved') {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-success text-white approve_btn mr-1 "
+                                                                  data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                            </div>
+                                                            <div class="col-2 close_approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-danger text-white close_approve_btn mr-1 "
+                                                                  data-tooltip="Close"><i class="bx bx-window-close"></i></a>
+                                                            </div>
+                                                            <div class="col-2 create_approve_div">
+                                                                  <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white create_approve_btn" data-tooltip="Approve">
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+            }
+          } else {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 mr-1">
+                                                              <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white" data-tooltip="Approved" disabled>
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+            }
+          }
+          $out .= ' <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                                class="expense-action-view btn btn-icon rounded-circle glow btn-secondary text-white mr-1 " data-tooltip="Generate Invoice">
+                                                                <i class="bx bx-printer"></i>
+                                                              </a>
+                                                            </div>';
+          if ($row->status != 'approved') {
+            $out .= ' <div class="col-2 ">
+                                                              <a href="expenses_edit-' . $row->id . '"
+                                                                class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-warning text-white mr-1 "
+                                                                id="update_expenses" data-tooltip="Edit">
+                                                                <i class="bx bx-edit"></i>
+                                                              </a>
+                                                            </div>
+                                                            <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                              class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-danger text-white mr-1  delete_expenses"
+                                                              data-expense_id="' . $row->id . '" data-tooltip="Delete">
+                                                                  <i class="bx bx-trash-alt"></i>
+                                                              </a>
+                                                            </div>';
+          }
+          $out .= '</div>
+                                        </td>
+                                        <td></td>
+                                        <td>
+                                            <a href="javascript:void(0);">EXP-' . $row->id . '</a>
+                                        </td>';
+          if ($row->client_name != '') {
+            $out .= '<td id="client_id">' . $row->client_case_no . '</td>';
+          } else {
+            $out .= '<td></td>';
+          }
+          $out .= '<td>' . $row->entry_by . '</td>
+                                        <td>' . $row->sub_heads . '</td>
+                                        <td>' . number_format($row->amount, 2) . '</td>
+                                        <td>';
+          if ($row->bill != "") {
+            $out .= '<a href="' . $row->bill . '">View</a>';
+          } else {
+          }
+          $out .= '</td>
+                                        <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                                        <td>' . $row->mode_of_payment . '</td>
+                                        <td>' . $row->ref_no . '</td>
+                                      
+                                        <td>';
+          if ($row->self == 'no') {
+            $out .= '<span class="badge badge-pill badge-light-danger">' . $row->self . '</span>';
+          } else {
+            $out .= '<span class="badge badge-pill badge-light-success">' . $row->self . '</span>';
+          }
+          $out .= '</td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td> <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div></td>
+                                        <td><div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                        <div class="apr_by_ui" style="display:none">
+    
+                                            <select class="form-control required approve_by" name="approve_by"
+                                                style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select approve by---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                            <span class="valid_err approve_by_err"></span>
+                                        </div></td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                    </table>
+                
+        </div>';
+
+        return json_encode(array('status' => 'success', 'out' => $out));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Expense can not filter'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return 'Database error';
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return 'Error';
+    }
+  }
+
+  public function filter_approve_expense(Request $request)
+  {
+
+    try {
+      $selecteddate = $request->selecteddate;
+
+      log::info($selecteddate);
+      $today = date('Y-m-d');
+      $tomorrow = date(('Y-m-d'), strtotime("+1 day"));
+      $this_week = [Carbon::now()->startOfWeek(), Carbon::now()->endOfWeek()];
+      if (date('m') > 03) {
+        $year = date('Y');
+        $year1 = $year + 1;
+      } else {
+        $year = date('Y') - 1;
+        $year1 = $year + 1;
+      }
+
+      $start_fiscal_year = strtotime('1-April-' . $year);
+      $end_fiscal_year = strtotime('31-March-' . $year1);
+      $start_year = date('Y-m-d', $start_fiscal_year);
+      $end_year = date('Y-m-d', $end_fiscal_year);
+
+      if ($selecteddate == 'today') {
+        $expense_entry = DB::table('expense')
+          ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+          ->select('expense.*', 'accounting_sub_heads.sub_heads')->where('expense.status', 'approved')->where('expense.company', session('default_company_id'))->whereDate('expense.approve_date', $today)->orderby('expense.id', 'desc')->get();
+      } else if ($selecteddate == 'next_day') {
+        $expense_entry = DB::table('expense')
+          ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+          ->select('expense.*', 'accounting_sub_heads.sub_heads')->where('expense.status', 'approved')->where('expense.company', session('default_company_id'))->whereDate('expense.approve_date', $tomorrow)->orderby('expense.id', 'desc')->get();
+      } else if ($selecteddate == 'this_week') {
+        $expense_entry = DB::table('expense')
+          ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+          ->select('expense.*', 'accounting_sub_heads.sub_heads')->where('expense.status', 'approved')->where('expense.company', session('default_company_id'))->whereBetween('expense.approve_date', $this_week)->orderby('expense.id', 'desc')->get();
+      } else if ($selecteddate == 'this_month') {
+        $expense_entry = DB::table('expense')
+          ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+          ->select('expense.*', 'accounting_sub_heads.sub_heads')->where('expense.status', 'approved')->where('expense.company', session('default_company_id'))->whereMonth('expense.approve_date', date('m'))->whereYear('expense.approve_date', $year)->orderby('expense.id', 'desc')->get();
+      } else if ($selecteddate == 'this_year') {
+        $expense_entry = DB::table('expense')
+          ->join('accounting_sub_heads', 'accounting_sub_heads.id', 'expense.ledger')
+          ->select('expense.*', 'accounting_sub_heads.sub_heads')->where('expense.status', 'approved')->where('expense.company', session('default_company_id'))->whereBetween('expense.approve_date', [$start_year, $end_year])->orderby('expense.id', 'desc')->get();
+      }
+
+
+      if ($expense_entry) {
+        $staff = $this->get_staff_list_userid();
+        $out = ' ';
+        $out .= '<div class="action-dropdown-btn d-none">
+            <div class="dropdown expense-filter-action">
+                <button class="btn border dropdown-toggle mr-1" type="button" id="expense-filter-btn"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <span class="selection">APPROVED</span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-filter-btn">
+                    <a type="button" class="dropdown-item active_btn" data-value="open">Open</a>
+                    <a type="button" class="dropdown-item active_btn" data-value="approved">Approved</a>
+                    <!--<a type="button" class="dropdown-item active_btn" data-value="reimbursed">Reimbursed</a>-->
+                </div>
+            </div>
+            
+            <div class="dropdown expense-options">
+                <button class="btn border dropdown-toggle mr-2" type="button" id="expense-options-btn"
+                    data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    Options
+                </button>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-options-btn">
+                    <a class="dropdown-item" href="javascript:;">Delete</a>
+                    <a class="dropdown-item" href="javascript:;">Approve</a>
+                </div>
+            </div>
+            <div class="dropdown expense-filter-action">
+                  <button class="btn border dropdown-toggle mr-1" type="button" id="expense-approved-filter-btn"
+                      data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                      <span class="selection1">Filter</span>
+                  </button>
+                  <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-approved-filter-btn">
+                      <a type="button" href="javascript:void(0);" class="dropdown-item filter_approve_btn"
+                          data-value="today">Today</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="next_day">Next
+                          Day</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_week">This
+                          Week</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_month">This Month</a>
+                      <a class="dropdown-item filter_approve_btn" href="javascript:void(0);"
+                          data-value="this_year">This
+                          Year</a>
+                  </div>
+              </div>
+            
+            <div class="dropdown expense-options">
+                <a href="' . asset('expenses_add') . '" class="expense-action-view mr-1">
+                    <button type="button" id="create_expenses" class="btn mr-2 btn-icon btn-outline-primary">Add
+                        Expenses</button>
+                </a>
+            </div>
+        </div>
+            
+                <div class="table-responsive">
+                    <table class="table  expense-data-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th>Action</th>
+                                <th></th>
+                                <th>
+                                    <span class="align-middle">Expenses#</span>
+                                </th>
+                                <th>Client</th>
+                                <th>Entry By</th>
+                                <th>Ledger</th>
+                                <th>Amount</th>
+                                <th>Bill</th>
+                                <th>Date</th>
+                                <th>Mode of payment</th>
+                                <th>Reference No</th>
+                                
+                                <th>Reimbursement</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                                      <th>Approval By</th>';
+        }
+        $out .= '</tr>
+                        </thead>
+
+                        <tbody>';
+        foreach ($expense_entry as $row) {
+          $row->client_case_no = $this->get_client_case_no_by_id($row->client_id);
+          $client_name = DB::table('clients')->where('id', $row->client_id)->value('client_name');
+          $row->case_no = DB::table('clients')->where('id', $row->client_id)->value('case_no');
+          $staff_name = DB::table('staff')->where('sid', $row->by_whom)->value('name');
+          $approved_by_name = DB::table('staff')->where('sid', $row->approved_by)->value('name');
+          $row->client_name = $client_name;
+          $row->entry_by = $staff_name;
+          $row->approved_by_name = $approved_by_name;
+          $row->company_name = DB::table('company')->where('id', $row->company)->value('company_name');
+          $out .= '<tr>
+                                        <td></td>
+                                        <td></td>
+                                        <td><input type="hidden" class="form-control expense_id" value="' . $row->id . '"></td>
+                                        <td>
+                                            <div class="row expense-action">';
+          if ($row->status != 'approved') {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-success text-white approve_btn mr-1 "
+                                                                  data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                            </div>
+                                                            <div class="col-2 close_approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-danger text-white close_approve_btn mr-1 "
+                                                                  data-tooltip="Close"><i class="bx bx-window-close"></i></a>
+                                                            </div>
+                                                            <div class="col-2 create_approve_div">
+                                                                  <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white create_approve_btn" data-tooltip="Approve">
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+            }
+          } else {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 mr-1">
+                                                              <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white" data-tooltip="Approved" disabled>
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+            }
+          }
+          $out .= ' <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                                class="expense-action-view btn btn-icon rounded-circle glow btn-secondary text-white mr-1 " data-tooltip="Generate Invoice">
+                                                                <i class="bx bx-printer"></i>
+                                                              </a>
+                                                            </div>';
+          if ($row->status != 'approved') {
+            $out .= ' <div class="col-2 ">
+                                                              <a href="expenses_edit-' . $row->id . '"
+                                                                class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-warning text-white mr-1 "
+                                                                id="update_expenses" data-tooltip="Edit">
+                                                                <i class="bx bx-edit"></i>
+                                                              </a>
+                                                            </div>
+                                                            <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                              class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-danger text-white mr-1  delete_expenses"
+                                                              data-expense_id="' . $row->id . '" data-tooltip="Delete">
+                                                                  <i class="bx bx-trash-alt"></i>
+                                                              </a>
+                                                            </div>';
+          }
+          $out .= '</div>
+                                        </td>
+                                        <td></td>
+                                        <td>
+                                            <a href="javascript:void(0);">EXP-' . $row->id . '</a>
+                                        </td>';
+          if ($row->client_name != '') {
+            $out .= '<td id="client_id">' . $row->client_case_no . '</td>';
+          } else {
+            $out .= '<td></td>';
+          }
+          $out .= '<td>' . $row->entry_by . '</td>
+                                        <td>' . $row->sub_heads . '</td>
+                                        <td>' . number_format($row->amount, 2) . '</td>
+                                        <td>';
+          if ($row->bill != "") {
+            $out .= '<a href="' . $row->bill . '">View</a>';
+          } else {
+          }
+          $out .= '</td>
+                                        <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                                        <td>' . $row->mode_of_payment . '</td>
+                                        <td>' . $row->ref_no . '</td>
+                                      
+                                        <td>';
+          if ($row->self == 'no') {
+            $out .= '<span class="badge badge-pill badge-light-danger">' . $row->self . '</span>';
+          } else {
+            $out .= '<span class="badge badge-pill badge-light-success">' . $row->self . '</span>';
+          }
+          $out .= '</td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td> <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div></td>
+                                        <td><div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                        <div class="apr_by_ui" style="display:none">
+    
+                                            <select class="form-control required approve_by" name="approve_by"
+                                                style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select approve by---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                            <span class="valid_err approve_by_err"></span>
+                                        </div></td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                    </table>
+                
+        </div>';
+
+        return json_encode(array('status' => 'success', 'out' => $out));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Expense can not filter'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return 'Database error';
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return 'Error';
+    }
+  }
+
+  public function create_subhead(Request $request)
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+      $head = $request->head;
+      $subhead = $request->subhead;
+      $insert = DB::table('accounting_sub_heads')->insert([
+        'heads_id' => $head,
+        'sub_heads' => $subhead,
+        'created_at' => now()
+      ]);
+
+      if ($insert) {
+
+        $out = '';
+        $data = DB::table('accounting_sub_heads')->get();
+        $out .= '<option value="">--Select ledger--</option>';
+        foreach ($data as $row) {
+          $out .= '<option value="' . $row->id . '">' . $row->sub_heads . '</option>';
+        }
+        return $out;
+      } else {
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function approve_expense(Request $request)
+  {
+    try {
+      $filter = $request->filter;
+      $id = $request->id;
+      $id = explode(',', $id);
+      $approve_by = $request->approve_by;
+      $var = $request->approve_date;
+      $date = str_replace('/', '-', $var);
+      $approve_date = date('Y-m-d', strtotime($date));
+      $status = $request->status;
+      $total = sizeof($id);
+
+
+      for ($i = 0; $i < $total; $i++) {
+        $update = DB::table('expense')->where('id', $id[$i])->update([
+          'approved_by' => $approve_by,
+          'approve_date' => $approve_date,
+          'status' => $status
+        ]);
+      }
+
+      $staff = $this->get_staff_list_userid();
+      $session = DB::table('session')->where('status', 'open')->get();
+      $session_array = array();
+      foreach ($session as $ses) {
+        $session1 = explode('-', $ses->session);
+        for ($i = 0; $i < sizeof($session1); $i++) {
+          $session_array[] = $session1[$i];
+        }
+      }
+
+      $first = $session_array[0];
+      $last = $session_array[sizeof($session_array) - 1];
+      $first_dt = $first . '-' . '04-' . '01';
+      $last_dt = $last . '-' . '03-' . '31';
+
+      if ($update) {
+        if ($filter == null) {
+          $expense = $this->open_expenses($first_dt, $last_dt);
+        } else if ($filter == 'approved') {
+          $expense = $this->approved_expenses($first_dt, $last_dt);
+        } else if ($filter == 'open') {
+          $expense = $this->open_expenses($first_dt, $last_dt);
+        }
+
+        $out = ' ';
+        $out .= '<div class="action-dropdown-btn d-none">
+                    <div class="dropdown expense-filter-action">
+                        <button class="btn border dropdown-toggle mr-1" type="button" id="expense-filter-btn"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <span class="selection">OPEN</span>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-filter-btn">
+                            <a type="button" class="dropdown-item active_btn" data-value="open">Open</a>
+                            <a type="button" class="dropdown-item active_btn" data-value="approved">Approved</a>
+                            <!--<a type="button" class="dropdown-item active_btn" data-value="reimbursed">Reimbursed</a>-->
+                        </div>
+                    </div>
+                    <div class="dropdown expense-options">
+                        <button class="btn border dropdown-toggle mr-2" type="button" id="expense-options-btn"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Options
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-options-btn">
+                        <a class="dropdown-item all_delete" href="javascript:void(0);">Delete</a>
+                        <a class="dropdown-item all_expense_approve" href="javascript:void(0);">Approve</a>
+                        </div>
+                    </div>
+                    <div class="dropdown expense-options">
+                        <a href="' . asset('expenses_add') . '" class="expense-action-view mr-1">
+                            <button type="button" id="create_expenses" class="btn mr-2 btn-icon btn-outline-primary">Add
+                                Expenses</button>
+                        </a>
+                    </div>
+                </div>
+        
+               
+                        <div class="table-responsive">
+                            <table class="table  expense-data-table">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th></th>
+                                        <th></th>
+                                        <th>Action</th>
+                                        <th></th>
+                                        <th>
+                                            <span class="align-middle">Expenses#</span>
+                                        </th>
+                                        <th>Client</th>
+                                        <th>Entry By</th>
+                                        <th>Ledger</th>
+                                        <th>Amount</th>
+                                        <th>Bill</th>
+                                        <th>Date</th>
+                                        <th>Mode of payment</th>
+                                        <th>Reference No</th>
+                                        
+                                        <th>Reimbursement</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approve Date</th>
+                                        <th>Approve By</th>';
+        }
+
+        $out .= '</tr>
+                                </thead>
+        
+                                <tbody>';
+        foreach ($expense as $row) {
+          $row->client_case_no = $this->get_client_case_no_by_id($row->client_id);
+          $out .= '<tr>
+                                        <td></td>
+                                        <td></td>
+                                        <td><input type="hidden" class="form-control expense_id" value="' . $row->id . '"></td>
+                                        <td>
+                                        <div class="row expense-action">';
+          if ($row->status != 'approved') {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 approve_div" style="display:none;">
+                                                          <a href="#" data-id="' . $row->id . '"
+                                                              class="btn btn-icon rounded-circle glow btn-success text-white approve_btn mr-1 "
+                                                              data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                        </div>
+                                                        <div class="col-2 close_approve_div" style="display:none;">
+                                                          <a href="#" data-id="' . $row->id . '"
+                                                              class="btn btn-icon rounded-circle glow btn-danger text-white close_approve_btn mr-1 "
+                                                              data-tooltip="Close"><i class="bx bx-window-close"></i></a>
+                                                        </div>
+                                                        <div class="col-2 create_approve_div">
+                                                              <button type="button" data-id="' . $row->id . '"
+                                                              class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white create_approve_btn" data-tooltip="Approve">
+                                                              <i class="bx bx-list-check"></i>
+                                                          </button>
+                                                        </div>';
+            }
+          } else {
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= ' <div class="col-2 mr-1">
+                                                          <button type="button" data-id="' . $row->id . '"
+                                                              class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white" data-tooltip="Approved" disabled>
+                                                              <i class="bx bx-list-check"></i>
+                                                          </button>
+                                                        </div>';
+            }
+          }
+          $out .= ' <div class="col-2">
+                                                          <a href="javascript:void(0);"
+                                                            class="expense-action-view btn btn-icon rounded-circle glow btn-secondary text-white mr-1 " data-tooltip="Generate Invoice">
+                                                            <i class="bx bx-printer"></i>
+                                                          </a>
+                                                        </div>';
+          if ($row->status != 'approved') {
+            $out .= ' <div class="col-2 ">
+                                                          <a href="expenses_edit-' . $row->id . '"
+                                                            class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-warning text-white mr-1 "
+                                                            id="update_expenses" data-tooltip="Edit">
+                                                            <i class="bx bx-edit"></i>
+                                                          </a>
+                                                        </div>
+                                                        <div class="col-2">
+                                                          <a href="javascript:void(0);"
+                                                          class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-danger text-white mr-1  delete_expenses"
+                                                          data-expense_id="' . $row->id . '" data-tooltip="Delete">
+                                                              <i class="bx bx-trash-alt"></i>
+                                                          </a>
+                                                        </div>';
+          }
+          $out .= '</div>
+                                    </td>
+                                        <td></td>
+                                        <td>
+                                            <a href="javascript:void(0);">EXP-' . $row->id . '</a>
+                                        </td>';
+          if ($row->client_name != '') {
+            $out .= '<td id="client_id">' . $row->client_case_no . '</td>';
+          } else {
+            $out .= '<td></td>';
+          }
+          $out .= '<td>' . $row->entry_by . '</td>
+                                        <td>' . $row->sub_heads . '</td>
+                                        <td>' . number_format($row->amount, 2) . '</td>
+                                        <td>';
+          if ($row->bill != "") {
+            $out .= '<a href="' . $row->bill . '">View</a>';
+          } else {
+          }
+          $out .= '</td>
+                                        <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                                        <td>' . $row->mode_of_payment . '</td>
+                                        <td>' . $row->ref_no . '</td>
+                                       
+                                        <td>';
+          if ($row->self == 'no') {
+            $out .= '<span class="badge badge-pill badge-light-danger">' . $row->self . '</span>';
+          } else {
+            $out .= '<span class="badge badge-pill badge-light-success">' . $row->self . '</span>';
+          }
+          $out .= '</td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td> <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div></td>
+                                        <td><div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                        <div class="apr_by_ui" style="display:none">
+    
+                                            <select class="form-control required approve_by" name="approve_by"
+                                                style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' > $stf->name . '</option>';
+              }
+            }
+
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select approve by---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                            <span class="valid_err approve_by_err"></span>
+                                        </div></td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                            </table>
+                       
+                </div>';
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Expense has been approved!'));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Expense can not be approved'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function delete_expense(Request $request)
+  {
+    try {
+      if (!$request->wantsJson()) {
+        $filter = $request->filter;
+        $id = $request->id;
+        $expense_id = $request->expense_id;
+
+        if (!empty($id)) {
+          $delete = DB::table('expense')->where('id', $id)->delete();
+        } else {
+          $total = sizeof($expense_id);
+          for ($i = 0; $i < $total; $i++) {
+            $delete = DB::table('expense')->where('id', $expense_id[$i])->delete();
+          }
+        }
+        $session = DB::table('session')->where('status', 'open')->get();
+        $session_array = array();
+        foreach ($session as $ses) {
+          $session1 = explode('-', $ses->session);
+          for ($i = 0; $i < sizeof($session1); $i++) {
+            $session_array[] = $session1[$i];
+          }
+        }
+
+        $first = $session_array[0];
+        $last = $session_array[sizeof($session_array) - 1];
+        $first_dt = $first . '-' . '04-' . '01';
+        $last_dt = $last . '-' . '03-' . '31';
+        if ($delete) {
+          if ($filter == null) {
+            $expense = $this->open_expenses($first_dt, $last_dt);
+          } else if ($filter == 'approved') {
+            $expense = $this->approved_expenses($first_dt, $last_dt);
+          } else if ($filter == 'open') {
+            $expense = $this->open_expenses($first_dt, $last_dt);
+          }
+
+          $staff = $this->get_staff_list_userid();
+
+          $out = ' ';
+          $out .= '<div class="action-dropdown-btn d-none">
+                    <div class="dropdown expense-filter-action">
+                        <button class="btn border dropdown-toggle mr-1" type="button" id="expense-filter-btn"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <span class="selection">OPEN</span>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-filter-btn">
+                            <a type="button" class="dropdown-item active_btn" data-value="open">Open</a>
+                            <a type="button" class="dropdown-item active_btn" data-value="approved">Approved</a>
+                            <!--<a type="button" class="dropdown-item active_btn" data-value="reimbursed">Reimbursed</a>-->
+                        </div>
+                    </div>
+                    <div class="dropdown expense-options">
+                        <button class="btn border dropdown-toggle mr-2" type="button" id="expense-options-btn"
+                            data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            Options
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-right" aria-labelledby="expense-options-btn">
+                        <a class="dropdown-item all_delete" href="javascript:void(0);">Delete</a>
+                        <a class="dropdown-item all_expense_approve" href="javascript:void(0);">Approve</a>
+                        </div>
+                    </div>
+                    <div class="dropdown expense-options">
+                        <a href="' . asset('expenses_add') . '" class="expense-action-view mr-1">
+                            <button type="button" id="create_expenses" class="btn mr-2 btn-icon btn-outline-primary">Add
+                                Expenses</button>
+                        </a>
+                    </div>
+                </div>
+        
+               
+                <input type="hidden" id="expense_filter" value="' . $filter . '">
+               
+                <div class="table-responsive">
+                    <table class="table expense-data-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th></th>
+                                <th></th>
+                                <th>Action</th>
+                                <th></th>
+                                <th>
+                                    <span class="align-middle">Expenses#</span>
+                                </th>
+                                <th>Client</th>
+                                 <th>Entry By</th>
+                                <th>ledger</th>
+                                <th>Amount</th>
+                                <th>Bill</th>
+                                <th>Date</th>
+                                <th>Mode of payment</th>
+                                <th>Reference No</th>
+                               
+                                <th>Reimbursement</th>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<th>Approve Date</th>
+                                <th>Approve By</th>';
+          }
+
+          $out .= '</tr>
+                        </thead>
+
+                        <tbody>';
+          foreach ($expense as $row) {
+            $row->client_case_no = $this->get_client_case_no_by_id($row->client_id);
+            $out .= '<tr>
+                                <td></td>
+                                <td></td>
+                                <td><input type="hidden" class="form-control expense_id" value="' . $row->id . '"></td>
+                                <td>
+                                            <div class="row expense-action">';
+            if ($row->status != 'approved') {
+              if (session('role_id') == 1 || session('role_id') == 3) {
+                $out .= ' <div class="col-2 approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-success text-white approve_btn mr-1 "
+                                                                  data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                            </div>
+                                                            <div class="col-2 close_approve_div" style="display:none;">
+                                                              <a href="#" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-danger text-white close_approve_btn mr-1 "
+                                                                  data-tooltip="Close"><i class="bx bx-window-close"></i></a>
+                                                            </div>
+                                                            <div class="col-2 create_approve_div">
+                                                                  <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white create_approve_btn" data-tooltip="Approve">
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+              }
+            } else {
+              if (session('role_id') == 1 || session('role_id') == 3) {
+                $out .= ' <div class="col-2 mr-1">
+                                                              <button type="button" data-id="' . $row->id . '"
+                                                                  class="btn btn-icon rounded-circle glow btn-primary mr-1  text-white" data-tooltip="Approved" disabled>
+                                                                  <i class="bx bx-list-check"></i>
+                                                              </button>
+                                                            </div>';
+              }
+            }
+            $out .= ' <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                                class="expense-action-view btn btn-icon rounded-circle glow btn-secondary text-white mr-1 " data-tooltip="Generate Invoice">
+                                                                <i class="bx bx-printer"></i>
+                                                              </a>
+                                                            </div>';
+            if ($row->status != 'approved') {
+              $out .= ' <div class="col-2 ">
+                                                              <a href="expenses_edit-' . $row->id . '"
+                                                                class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-warning text-white mr-1 "
+                                                                id="update_expenses" data-tooltip="Edit">
+                                                                <i class="bx bx-edit"></i>
+                                                              </a>
+                                                            </div>
+                                                            <div class="col-2">
+                                                              <a href="javascript:void(0);"
+                                                              class="expense-action-edit cursor-pointer btn btn-icon rounded-circle glow btn-danger text-white mr-1  delete_expenses"
+                                                              data-expense_id="' . $row->id . '" data-tooltip="Delete">
+                                                                  <i class="bx bx-trash-alt"></i>
+                                                              </a>
+                                                            </div>';
+            }
+            $out .= '</div>
+                                        </td>
+                                <td></td>
+                                <td>
+                                    <a href="javascript:void(0);">EXP-' . $row->id . '</a>
+                                </td>';
+            if ($row->client_name != '') {
+              $out .= '<td id="client_id">' . $row->client_case_no . '</td>';
+            } else {
+              $out .= '<td></td>';
+            }
+            $out .= '<td>' . $row->entry_by . '</td>
+                                <td>' . $row->sub_heads . '</td>
+                                <td>' . number_format($row->amount, 2) . '</td>
+                                <td>';
+            if ($row->bill != "") {
+              $out .= '<a href="' . $row->bill . '">View</a>';
+            } else {
+            }
+            $out .= '</td>
+                                <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                                <td>' . $row->mode_of_payment . '</td>
+                                <td>' . $row->ref_no . '</td>
+                                
+                                <td>';
+            if ($row->self == 'no') {
+              $out .= '<span class="badge badge-pill badge-light-danger">' . $row->self . '</span>';
+            } else {
+              $out .= '<span class="badge badge-pill badge-light-success">' . $row->self . '</span>';
+            }
+            $out .= '</td>';
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<td> <div class="apr_dt_data">';
+              if ($row->approve_date != '') {
+                $out .= date('d-m-Y', strtotime($row->approve_date));
+              }
+              $out .= '</div>
+                            <div class="apr_dt_ui" style="display:none">
+                                <input type="text" class="form-control datepicker approve_date"
+                                    placeholder="approve_date">
+                                <span class="valid_err approve_date_err"></span>
+                            </div></td>
+                                <td><div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                <div class="apr_by_ui" style="display:none">
+
+                                    <select class="form-control required approve_by" name="approve_by"
+                                        style="width:100%">';
+              foreach ($staff as $stf) {
+                if ((session('role_id') == 1 || session('role_id') == 3) &&
+                  (session('user_id') == $stf->user_id)
+                ) {
+                  $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+                }
+              }
+
+
+              if (session('role_id') == 1 || session('role_id') == 3) {
+                $out .= '<option value="">---Select approve by---</option>';
+                foreach ($staff as $stf) {
+                  $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+                }
+              }
+              $out .= '</select>
+                                    <span class="valid_err approve_by_err"></span>
+                                </div></td>';
+            }
+            $out .= '</tr>';
+          }
+          $out .= '</tbody>
+                    </table>
+                
+        </div>';
+
+          return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Expense has been deleted successfully!'));
+        } else {
+          return json_encode(array('status' => 'error', 'msg' => 'Expense can not be deleted'));
+        }
+      } else {
+        $expense_id = $request->expense_id;
+        $delete = DB::table('expense')->where('id', $expense_id)->delete();
+        if ($delete) {
+          return json_encode(array('status' => 'success', 'msg' => 'Expense delete successfully'));
+        } else {
+          return json_encode(array('status' => 'success', 'msg' => 'Expense can`t be deleted'));
+        }
+      }
+    } catch (QueryException $e) {
+      Log::error($e->getMessage());
+      return json_encode(array('status' => 'error', 'msg' => $e->getMessage()));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return json_encode(array('status' => 'error', 'msg' => $e->getMessage()));
+    }
+  }
+
+  public function travelling_allowance_index()
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+
+      $travelling_allowance = $this->pending_travelling_allowance();
+
+
+      $staff = $this->get_staff_list_userid();
+
+      return view('pages.travelling_allowance', compact('staff', 'travelling_allowance'));
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+  public function autocomplete_destination(Request $request)
+  {
+    $destination = DB::table('destination')->get();
+    $destination_name_array = array();
+    foreach ($destination as $row) {
+      array_push($destination_name_array, $row->place);
+    }
+    return $destination_name_array = $destination_name_array;
+  }
+
+  public function travelling_allowance_add(Request $request)
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+      $distance = $request->distance;
+      $destination = trim(ucwords($request->destination));
+      $date = $request->date;
+      $date = str_replace('/', '-', $date);
+      $date = date('Y-m-d', strtotime($date));
+
+      $entry_by = $request->by_whom;
+      $vehicle_type = $request->vehicle_type;
+      log::info($vehicle_type);
+      $check = DB::table('destination')->where('place', $destination)->count();
+      if ($check == 0) {
+        $insert_id = DB::table('destination')->insertGetId([
+          'place' => $destination
+        ]);
+      } else {
+        $insert_id = DB::table('destination')->where('place', $destination)->value('id');
+      }
+      if ($insert_id) {
+        $insert = DB::table('travelling_allowance')->insert([
+          'destination_id' => $insert_id,
+          'date' => $date,
+          'distance' => $distance,
+          'entry_by' => $entry_by,
+          'company' => session('company_id'),
+          'status' => 'pending',
+          'vehicle_type' => $vehicle_type
+        ]);
+      }
+      if ($insert) {
+        if (session('role_id') == 1) {
+          $data = $this->pending_travelling_allowance($id = '');
+        } else {
+          $user_id = session('user_id');
+          $id = DB::table('users')->where('id', $user_id)->value('user_id');
+          $data = $this->pending_travelling_allowance($id);
+        }
+
+        $staff = $this->get_staff_list_userid();
+        $out = '';
+
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Vehicle Type</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                                      <button type="button" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                                          data-tooltip="Approve">
+                                                          <i class="bx bx-list-check"></i>
+                                                      </button>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Close"><i
+                                                              class="bx bx-window-close"></i></a>
+                                                  </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+                                class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+                                data-tooltip="Reject">
+                                <i class="bx bx-list-check"></i>
+                                </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-vehicle_type="' . $row->vehicle_type . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                <a href="javascript:void(0);"
+                                    class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                    data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                    <i class="bx bx-trash-alt"></i>
+                                </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+                            <td>' . $row->place . '</td>
+                            <td>' . $row->distance . '</td>
+                            <td>' . $row->vehicle_type . '</td>
+                            <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                            <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approval By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+    </div>';
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Travelling Allowance added successfully!', 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Travelling Allowance can not be added!'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function travelling_allowance_update(Request $request)
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+      $filter = $request->filter;
+      $travelling_allowance_id = $request->travelling_allowance_id;
+      $distance = $request->distance;
+      $destination = trim(ucwords($request->destination));
+      $date = $request->date;
+     $date = str_replace('/', '-', $date);
+     $date = date('Y-m-d', strtotime($date));
+      $entry_by = $request->by_whom;
+      $vehicle_type = $request->vehicle_type;
+      $check = DB::table('destination')->where('place', $destination)->count();
+      if ($check == 0) {
+        $insert_id = DB::table('destination')->insertGetId([
+          'place' => $destination,
+        ]);
+      } else {
+        $insert_id = DB::table('destination')->where('place', $destination)->value('id');
+      }
+      if ($insert_id) {
+        $update = DB::table('travelling_allowance')->where('id', $travelling_allowance_id)->update([
+          'destination_id' => $insert_id,
+          'date' => $date,
+          'distance' => $distance,
+          'entry_by' => $entry_by,
+          'vehicle_type' => $vehicle_type,
+          'updated_at' => now()
+        ]);
+      }
+
+      if ($update) {
+        if ($filter == null) {
+          if (session('role_id') == 1) {
+            $data = $this->pending_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->pending_travelling_allowance($id);
+          }
+        } else if ($filter == 'approved') {
+          if (session('role_id') == 1) {
+            $data = $this->approved_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->approved_travelling_allowance($id);
+          }
+        } else if ($filter == 'rejected') {
+          if (session('role_id') == 1) {
+            $data = $this->rejected_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->rejected_travelling_allowance($id);
+          }
+        }
+
+        $staff = $this->get_staff_list_userid();
+        $out = '';
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Vehicle Type</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                                      <button type="button" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                                          data-tooltip="Approve">
+                                                          <i class="bx bx-list-check"></i>
+                                                      </button>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Close"><i
+                                                              class="bx bx-window-close"></i></a>
+                                                  </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+                                class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+                                data-tooltip="Reject">
+                                <i class="bx bx-list-check"></i>
+                                </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-vehicle_type="' . $row->vehicle_type . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                        <a href="javascript:void(0);"
+                                        class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                        data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                        <i class="bx bx-trash-alt"></i>
+                                    </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+                            <td>' . $row->place . '</td>
+                            <td>' . $row->distance . '</td>
+                            <td>' . $row->vehicle_type . '</td>
+                            <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                            <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approval By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+          
+    </div>';
+
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Travelling Allowance updated successfully!', 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Travelling Allowance can not be updated!'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function delete_travelling_allowance(Request $request)
+  {
+    try {
+      if (session('username') == "") {
+        return redirect('/')->with('status', "Please login First");
+      }
+      $filter = $request->filter;
+      $id = $request->id;
+      $travelling_allowance_id = $request->travelling_allowance_id;
+
+      if (!empty($id)) {
+        $delete = DB::table('travelling_allowance')->where('id', $id)->delete();
+      } else {
+        $total = sizeof($travelling_allowance_id);
+        for ($i = 0; $i < $total; $i++) {
+          $delete = DB::table('travelling_allowance')->where('id', $travelling_allowance_id[$i])->delete();
+        }
+      }
+
+      if ($delete) {
+        if ($filter == null) {
+          if (session('role_id') == 1) {
+            $data = $this->pending_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->pending_travelling_allowance($id);
+          }
+        } else if ($filter == 'approved') {
+          if (session('role_id') == 1) {
+            $data = $this->approved_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->approved_travelling_allowance($id);
+          }
+        } else if ($filter == 'rejected') {
+          if (session('role_id') == 1) {
+            $data = $this->rejected_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->rejected_travelling_allowance($id);
+          }
+        }
+
+        $staff = $this->get_staff_list_userid();
+        $out = '';
+
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+
+
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                                      <button type="button" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                                          data-tooltip="Approve">
+                                                          <i class="bx bx-list-check"></i>
+                                                      </button>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Close"><i
+                                                              class="bx bx-window-close"></i></a>
+                                                  </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+                                class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+                                data-tooltip="Reject">
+                                <i class="bx bx-list-check"></i>
+                                </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                <a href="javascript:void(0);"
+                                    class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                    data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                    <i class="bx bx-trash-alt"></i>
+                                </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+                            <td>' . $row->place . '</td>
+                            <td>' . $row->distance . '</td>
+                            <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                            <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approve By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+    </div>';
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Travelling Allowance has been deleted successfully!', 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Travelling Allowance can not be deleted!'));
+      }
+    } catch (QueryException $e) {
+      Log::error($e->getMessage());
+      return json_encode(array('status' => 'error', 'msg' => $e->getMessage()));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return json_encode(array('status' => 'error', 'msg' => $e->getMessage()));
+    }
+  }
+
+  public function approve_travelling_allowance(Request $request)
+  {
+    try {
+      $filter = $request->filter;
+      $id = $request->id;
+      $id = explode(',', $id);
+      $approve_by = $request->approve_by;
+      $var = $request->approve_date;
+      $date = str_replace('/', '-', $var);
+      $approve_date = date('Y-m-d', strtotime($date));
+      $status = $request->status;
+      $total = sizeof($id);
+
+
+      for ($i = 0; $i < $total; $i++) {
+        $update = DB::table('travelling_allowance')->where('id', $id[$i])->update([
+          'approved_by' => $approve_by,
+          'approve_date' => $approve_date,
+          'status' => $status
+        ]);
+      }
+
+      log::info($update);
+      if ($update) {
+        $staff = $this->get_staff_list_userid();
+        if ($filter == null) {
+          if (session('role_id') == 1) {
+            $data = $this->pending_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->pending_travelling_allowance($id);
+          }
+        } else if ($filter == 'approved') {
+          if (session('role_id') == 1) {
+            $data = $this->approved_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->approved_travelling_allowance($id);
+          }
+        } else if ($filter == 'rejected') {
+          if (session('role_id') == 1) {
+            $data = $this->rejected_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->rejected_travelling_allowance($id);
+          }
+        }
+
+        $out = '';
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                                      <button type="button" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                                          data-tooltip="Approve">
+                                                          <i class="bx bx-list-check"></i>
+                                                      </button>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Close"><i
+                                                              class="bx bx-window-close"></i></a>
+                                                  </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+                                class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+                                data-tooltip="Reject">
+                                <i class="bx bx-list-check"></i>
+                                </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                        <a href="javascript:void(0);"
+                                        class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                        data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                        <i class="bx bx-trash-alt"></i>
+                                    </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+                            <td>' . $row->place . '</td>
+                            <td>' . $row->distance . '</td>
+                            <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                            <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approval By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+          
+    </div>';
+
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Travelling Allowance has been approved successfully!', 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error',));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database Error', 'msg' => 'Travelling Allowance can not be approved!'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function reject_travelling_allowance(Request $request)
+  {
+    try {
+      $filter = $request->filter;
+      $id = $request->id;
+      $travelling_allowance_id = $request->travelling_allowance_id;
+      $status = $request->status;
+
+      if (!empty($id)) {
+        $update = DB::table('travelling_allowance')->where('id', $id)->update([
+          'approved_by' => Null,
+          'approve_date' => Null,
+          'status' => $status
+        ]);
+      } else {
+        $total = sizeof($travelling_allowance_id);
+        for ($i = 0; $i < $total; $i++) {
+          $update = DB::table('travelling_allowance')->where('id', $travelling_allowance_id[$i])->update([
+            'approved_by' => Null,
+            'approve_date' => Null,
+            'status' => $status
+          ]);
+        }
+      }
+
+
+
+      if ($update) {
+        if ($filter == null) {
+          if (session('role_id') == 1) {
+            $data = $this->pending_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->pending_travelling_allowance($id);
+          }
+        } else if ($filter == 'approved') {
+          if (session('role_id') == 1) {
+            $data = $this->approved_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->approved_travelling_allowance($id);
+          }
+        } else if ($filter == 'rejected') {
+          if (session('role_id') == 1) {
+            $data = $this->rejected_travelling_allowance($id = '');
+          } else {
+            $user_id = session('user_id');
+            $id = DB::table('users')->where('id', $user_id)->value('user_id');
+            $data = $this->rejected_travelling_allowance($id);
+          }
+        }
+
+        $staff = $this->get_staff_list_userid();
+        $out = '';
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+
+   
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                                      <button type="button" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                                          data-tooltip="Approve">
+                                                          <i class="bx bx-list-check"></i>
+                                                      </button>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                                  </div>
+                                                  <div style="float: left">
+                                                      <a href="#" data-id="' . $row->id . '"
+                                                          class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                                          style="display:none;" data-tooltip="Close"><i
+                                                              class="bx bx-window-close"></i></a>
+                                                  </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+                                class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+                                data-tooltip="Reject">
+                                <i class="bx bx-list-check"></i>
+                                </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                        <a href="javascript:void(0);"
+                                        class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                        data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                        <i class="bx bx-trash-alt"></i>
+                                    </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+                            <td>' . $row->place . '</td>
+                            <td>' . $row->distance . '</td>
+                            <td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+                            <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approval By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+          
+    </div>';
+
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'msg' => 'Travelling Allowance has been rejected successfully!', 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error', 'msg' => 'Travelling Allowance can not be rejected!'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function filter_travelling_allowance(Request $request)
+  {
+
+    try {
+      $status = $request->value;
+      log::info($status);
+      if ($status == 'pending') {
+        if (session('role_id') == 1) {
+          $data = $this->pending_travelling_allowance($id = '');
+        } else {
+          $user_id = session('user_id');
+          $id = DB::table('users')->where('id', $user_id)->value('user_id');
+          $data = $this->pending_travelling_allowance($id);
+        }
+      } else if ($status == 'approved') {
+        if (session('role_id') == 1) {
+          $data = $this->approved_travelling_allowance($id = '');
+        } else {
+          $user_id = session('user_id');
+          $id = DB::table('users')->where('id', $user_id)->value('user_id');
+          $data = $this->approved_travelling_allowance($id);
+        }
+      } else if ($status == 'rejected') {
+        if (session('role_id') == 1) {
+          $data = $this->rejected_travelling_allowance($id = '');
+        } else {
+          $user_id = session('user_id');
+          $id = DB::table('users')->where('id', $user_id)->value('user_id');
+          $data = $this->rejected_travelling_allowance($id);
+        }
+      }
+
+      if ($data) {
+        $staff = $this->get_staff_list_userid();
+
+        $out = '';
+        $out .= '<div class="action-dropdown-btn d-none">
+        <div class="dropdown allowance-filter-action">
+            <button class="btn border dropdown-toggle mr-1" type="button" id="allowance-filter-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                <span class="status_selected">Pending</span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-filter-btn">
+            <a type="button" class="dropdown-item status_btn" data-value="pending">Pending</a>
+                <a type="button" class="dropdown-item status_btn" data-value="approved">Approved</a>
+                <a type="button" class="dropdown-item status_btn" data-value="rejected">Rejected</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <button class="btn border dropdown-toggle mr-2" type="button" id="allowance-options-btn"
+                data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                Options
+            </button>
+            <div class="dropdown-menu dropdown-menu-right" aria-labelledby="allowance-options-btn">
+                <a class="dropdown-item all_delete" href="javascript:;">Delete</a>
+                <a class="dropdown-item all_allowance_approve" href="javascript:;">Approve</a>
+                <a class="dropdown-item all_allowance_reject" href="javascript:;">Reject</a>
+            </div>
+        </div>
+        <div class="dropdown allowance-options">
+            <a href="#" class="allowance-action-view mr-1">
+                <button type="button" data-toggle="modal" data-target="#addModal" class="btn mr-2 btn-primary">Add
+                    Travelling
+                    Allowance</button>
+            </a>
+        </div>
+    </div>
+
+  
+        <input type="hidden" id="allowance_filter" value="' . $status . '">
+            <div class="table-responsive">
+                <table class="table allowance-data-table wrap" style="width:100%">
+                    <thead>
+                        <th></th>
+                        <th></th>
+                        <th></th>
+                        <th>Action</th>
+                        <th>Destination</th>
+                        <th>Distance</th>
+                        <th>Vehicle Type</th>
+                        <th>Date</th>
+                        <th>Entry By</th>
+                        <th>Status</th>';
+        if (session('role_id') == 1 || session('role_id') == 3) {
+          $out .= '<th>Approval Date</th>
+                        <th>Approval By</th>';
+        }
+        $out .= '</thead>
+                    <tbody>';
+        foreach ($data as $row) {
+          $out .= '<tr>
+                            <td></td>
+                            <td></td>
+                            <td><input type="hidden" class="form-control travelling_allowance_id"
+                                        value="' . $row->id . '"></td>
+                            <td>';
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            if ($row->status == 'pending' || $row->status == 'rejected') {
+              $out .= '<div style="float: left">
+                                    <button type="button" data-id="' . $row->id . '"
+                                        class="btn btn-icon rounded-circle glow btn-primary mr-1 mb-1 create_approve_btn"
+                                        data-tooltip="Approve">
+                                        <i class="bx bx-list-check"></i>
+                                    </button>
+                                </div>
+                                <div style="float: left">
+                                    <a href="#" data-id="' . $row->id . '"
+                                        class="btn btn-icon rounded-circle glow btn-success approve_btn mr-1 mb-1"
+                                        style="display:none;" data-tooltip="Done"><i class="bx bx-check"></i></a>
+                                </div>
+                                <div style="float: left">
+                                    <a href="#" data-id="' . $row->id . '"
+                                        class="btn btn-icon rounded-circle glow btn-danger close_approve_btn mr-1 mb-1"
+                                        style="display:none;" data-tooltip="Close"><i
+                                            class="bx bx-window-close"></i></a>
+                                </div>';
+            } else if ($row->status == 'approved') {
+              $out .= '<button type="button" data-id="' . $row->id . '"
+              class="btn btn-icon rounded-circle glow btn-success mr-1 mb-1 reject_btn"
+              data-tooltip="Reject">
+              <i class="bx bx-list-check"></i>
+              </button>';
+            }
+          }
+          if ($row->status == 'pending' || $row->status == 'rejected') {
+            $out .= '<button type="button"
+                                    class="btn btn-icon rounded-circle glow btn-warning updateModal mr-1 mb-1"
+                                    data-toggle="modal" data-target="#updateModal" data-id="' . $row->id . '"
+                                    data-place="' . $row->place . '" data-date="' . $row->date . '"
+                                    data-distance="' . $row->distance . '"
+                                    data-destination_id="' . $row->destination_id . '"
+                                    data-entry_by="' . $row->entry_by . '" data-tooltip="Edit"><i
+                                        class="bx bx-edit"></i></button>
+                                        <a href="javascript:void(0);"
+                                        class=" cursor-pointer btn btn-icon rounded-circle glow btn-danger mr-1 mb-1 delete_allowance"
+                                        data-allowance_id="' . $row->id . '" data-tooltip="Delete">
+                                        <i class="bx bx-trash-alt"></i>
+                                    </a>&nbsp;&nbsp;&nbsp;';
+          }
+          $out .= '</td>
+    <td>' . $row->place . '</td>
+    <td>' . $row->distance . '</td>';
+          if ($row->status == 'approved') {
+            $out .= '<td>' . $row->vehicle_type . '</td>';
+          } else {
+            $out .= '<td></td>';
+          }
+          $out .= '<td data-sort="' . strtotime($row->date) . '">' . date('d-m-Y', strtotime($row->date)) . '</td>
+    <td>' . $row->entry . '</td>';
+          if ($row->status == 'pending') {
+            $out .= '<td><span class="badge badge-pill badge-light-warning">' . $row->status . '</span></td>';
+          } else if ($row->status == 'approved') {
+            $out .= '<td><span class="badge badge-pill badge-light-success">' . $row->status . '</span></td>';
+          } else {
+            $out .= '<td><span class="badge badge-pill badge-light-danger">' . $row->status . '</span></td>';
+          }
+          if (session('role_id') == 1 || session('role_id') == 3) {
+            $out .= '<td>
+                                    <div class="apr_dt_data">';
+            if ($row->approve_date != '') {
+              $out .= date('d-m-Y', strtotime($row->approve_date));
+            }
+            $out .= '</div>
+                                    <div class="apr_dt_ui" style="display:none">
+                                        <input type="text" class="form-control datepicker approve_date"
+                                            placeholder="approve_date">
+                                        <span class="valid_err approve_date_err"></span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="apr_by_data">' . $row->approved_by_name . '</div>
+                                    <div class="apr_by_ui" style="display:none">
+
+                                        <select class="form-control required approve_by" name="approve_by"
+                                            style="width:100%">';
+            foreach ($staff as $stf) {
+              if ((session('role_id') == 1 || session('role_id') == 3) &&
+                (session('user_id') == $stf->user_id)
+              ) {
+                $out .= '<option value="' . $stf->sid . '" selected>' . $stf->name . '</option>';
+              }
+            }
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+              $out .= '<option value="">---Select Approval By---</option>';
+              foreach ($staff as $stf) {
+                $out .= '<option value="' . $stf->sid . '">' . $stf->name . '</option>';
+              }
+            }
+            $out .= '</select>
+                                        <span class="valid_err approve_by_err"></span>
+                                    </div>
+                                </td>';
+          }
+          $out .= '</tr>';
+        }
+        $out .= '</tbody>
+                </table>
+           
+    </div>';
+
+        $destination = DB::table('destination')->get();
+        $destination_name_array = array();
+        foreach ($destination as $row) {
+          array_push($destination_name_array, $row->place);
+        }
+        $destination_name_array = $destination_name_array;
+        return json_encode(array('status' => 'success', 'out' => $out, 'destination_name_array' => $destination_name_array));
+      } else {
+        return json_encode(array('status' => 'error'));
+      }
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return 'Database error';
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return 'Error';
+    }
+  }
+  public function get_expenses(Request $request)
+  {
+
+    $v = Validator::make($request->all(), [
+      'staff_id' => 'required',
+      'company_id' => 'required',
+      'month' => 'required',
+      'year' => 'required'
+    ]);
+
+    if ($v->fails()) {
+      return $v->errors();
+    }
+
+    try {
+      $staff_id = $request->staff_id;
+      $company_id = $request->company_id;
+      $month = $request->month;
+      $year = $request->year;
+      $open_expenses = $this->open_expenses_by_staff($staff_id, $company_id);
+      $approved_expenses = $this->approved_expenses_by_staff($staff_id, $company_id, $month, $year);
+      $rejected_expenses = $this->rejected_expenses_by_staff($staff_id, $company_id, $month, $year);
+
+      $total_open_exp = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->where('status', 'open')->sum('amount');
+      $total_open_reimbursement = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->where('self', 'yes')->where('status', 'open')->sum('amount');
+      $total_app_exp = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->whereMonth('date', $month)->whereYear('date', $year)->where('status', 'approved')->sum('amount');
+      $total_app_reimbursement = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->where('self', 'yes')->whereMonth('date', $month)->whereYear('date', $year)->where('status', 'approved')->sum('amount');
+      $total_rej_exp = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->whereMonth('date', $month)->whereYear('date', $year)->where('status', 'rejected')->sum('amount');
+      $total_rej_reimbursement = DB::table('expense')->where('by_whom', $staff_id)->where('company', $company_id)->where('self', 'yes')->whereMonth('date', $month)->whereYear('date', $year)->where('status', 'rejected')->sum('amount');
+
+      return response()->json([
+        'status' => 'success', 'open_expenses' => $open_expenses, 'approved_expenses' => $approved_expenses, 'rejected_expenses' => $rejected_expenses, 'total_open_exp' => number_format($total_open_exp, 2), 'total_open_reimbursement' => number_format($total_open_reimbursement, 2), 'total_app_exp' => number_format($total_app_exp, 2), 'total_app_reimbursement' => number_format($total_app_reimbursement, 2), 'total_rej_exp' => number_format($total_rej_exp, 2), 'total_rej_reimbursement' => number_format($total_rej_reimbursement, 2)
+      ]);
+    } catch (Exception $th) {
+      Log::error($th->getMessage());
+      return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+    }
+  }
+  public function add_distance(Request $request)
+  {
+
+    $v = Validator::make($request->all(), [
+      'staff_id' => 'required|numeric',
+      'distance' => 'required',
+      'date' => 'required'
+
+    ]);
+
+    if ($v->fails()) {
+      return $v->errors();
+    }
+
+    try {
+      $staff_id = $request->staff_id;
+      $distance = $request->distance;
+      $date = date('d-m-Y', strtotime($request->date));
+      $status = 'pending';
+      $check = DB::table('travelling_allowance')->where('entry_by', $staff_id)->where('date', $date)->count();
+      if ($check > 0) {
+        $add = DB::table('travelling_allowance')->where('entry_by', $staff_id)->where('date', $date)->update(['distance' => $distance]);
+      } else {
+        $add = DB::table('travelling_allowance')->insert(['distance' => $distance, 'entry_by' => $staff_id, 'date' => $date, 'status' => $status]);
+      }
+      if ($add) {
+        return response()->json(['status' => 'success', 'msg' => 'Distance add successfully']);
+      } else {
+        return response()->json(['status' => 'error', 'msg' => 'Distance can`t be added']);
+      }
+    } catch (Exception $th) {
+      Log::error($th->getMessage());
+      return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+    }
+  }
+  public function get_distance(Request $request)
+  {
+
+    $v = Validator::make($request->all(), [
+      'staff_id' => 'required|numeric',
+      'date' => 'required'
+
+    ]);
+
+    if ($v->fails()) {
+      return $v->errors();
+    }
+
+    try {
+      $staff_id = $request->staff_id;
+      $date = date('d-m-Y', strtotime($request->date));
+      $data = DB::table('travelling_allowance')->where('entry_by', $staff_id)->where('date', $date)->value('distance');
+      return response()->json(array('status' => 'success', 'data' => $data));
+    } catch (Exception $th) {
+      Log::error($th->getMessage());
+      return response()->json(['status' => 'error', 'msg' => 'Something Went Wrong'], 500);
+    }
+  }
+
+  public function expenses_report(Request $request)
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+      $staff = $this->get_staff_list_userid();
+      foreach ($staff as $row) {
+        $total_expense = DB::table('expense')->where('by_whom', $row->sid)->where('company', session('default_company_id'))->sum('amount');
+        $total_self = DB::table('expense')->where('by_whom', $row->sid)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+        $total_approved = DB::table('expense')->where('by_whom', $row->sid)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+        $total_unapproved = DB::table('expense')->where('by_whom', $row->sid)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+        $row->total_expense = $total_expense;
+        $row->total_self = $total_self;
+        $row->total_approved = $total_approved;
+        $row->total_unapproved = $total_unapproved;
+      }
+
+
+      return view('pages.expenses_report', compact('staff'));
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function get_expenses_report(Request $request)
+  {
+    try {
+      $staff_id = $request->staff;
+      $var1 = $request->from_date;
+      $date1 = str_replace('/', '-', $var1);
+      $from_date = date('Y-m-d', strtotime($date1));
+      $var2 = $request->to_date;
+      $date2 = str_replace('/', '-', $var2);
+      $to_date = date('Y-m-d', strtotime($date2));
+
+      $name = DB::table('staff')->where('sid', $staff_id)->value('name');
+      if ($staff_id == 'all') {
+        $staff = $this->get_staff_list_userid();
+
+        $out = ' ';
+        $out .= '
+            <div class="table-responsive">
+                  <table class="table  expense-data-table">
+                      <thead>
+                          <tr>
+                            <th></th>
+                            <th>Staff Name</th>
+                            <th>Total Expenses</th>
+                            <th>Total Reimbursement</th>
+                            <th>Total Approved</th>
+                            <th>Total Unapproved</th>
+                          </tr>
+                      </thead>';
+        $out .= '<tbody>';
+        foreach ($staff as $row) {
+          if ($from_date == '' && $to_date == '') {
+            $total_expense = DB::table('expense')->where('by_whom', $row->sid)->where('company', session('default_company_id'))->sum('amount');
+            $total_self = DB::table('expense')->where('by_whom', $row->sid)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+            $total_approved = DB::table('expense')->where('by_whom', $row->sid)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+            $total_unapproved = DB::table('expense')->where('by_whom', $row->sid)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+          }
+          if ($from_date != '' && $to_date == '') {
+            $total_expense = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('company', session('default_company_id'))->sum('amount');
+            $total_self = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+            $total_approved = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+            $total_unapproved = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+          }
+          if ($from_date != '' && $to_date != '') {
+            $total_expense = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('company', session('default_company_id'))->sum('amount');
+            $total_self = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+            $total_approved = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+            $total_unapproved = DB::table('expense')->where('by_whom', $row->sid)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+          }
+          $out .= '<tr>
+          <td></td>
+                              <td>' . $row->name . '</td>
+                              <td>' . number_format($total_expense, 2) . '</td>
+                              <td>' . number_format($total_self, 2) . '</td>
+                              <td>' . number_format($total_approved, 2) . '</td>
+                              <td>' . number_format($total_unapproved, 2) . '</td>
+                          </tr>';
+        }
+        $out .= '</tbody>
+                  </table>
+            </div>';
+      } else {
+        $name = DB::table('staff')->where('sid', $staff_id)->value('name');
+        if ($from_date == '' && $to_date == '') {
+          $total_expense = DB::table('expense')->where('by_whom', $staff_id)->where('company', session('default_company_id'))->sum('amount');
+          $total_self = DB::table('expense')->where('by_whom', $staff_id)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+          $total_approved = DB::table('expense')->where('by_whom', $staff_id)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+          $total_unapproved = DB::table('expense')->where('by_whom', $staff_id)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+        }
+
+        if ($from_date != '' && $to_date == '') {
+          $total_expense = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('company', session('default_company_id'))->sum('amount');
+          $total_self = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+          $total_approved = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+          $total_unapproved = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+        }
+        if ($from_date != '' && $to_date != '') {
+          $total_expense = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('company', session('default_company_id'))->sum('amount');
+          $total_self = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('self', 'yes')->where('company', session('default_company_id'))->sum('amount');
+          $total_approved = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('status', 'approved')->where('company', session('default_company_id'))->sum('amount');
+          $total_unapproved = DB::table('expense')->where('by_whom', $staff_id)->where('date', '>=', $from_date)->where('date', '<=', $to_date)->where('status', 'open')->where('company', session('default_company_id'))->sum('amount');
+        }
+
+        $out = ' ';
+        $out .= '
+            <div class="table-responsive">
+                  <table class="table  expense-data-table">
+                      <thead>
+                          <tr>
+                            <th>Staff Name</th>
+                            <th>Total Expenses</th>
+                            <th>Total Reimbursement</th>
+                            <th>Total Approved</th>
+                            <th>Total Unapproved</th>
+                          </tr>
+                      </thead>';
+        $out .= '<tbody>';
+        $out .= '<tr>
+                    <td>' . $name . '</td>
+                    <td>' . number_format($total_expense, 2) . '</td>
+                    <td>' . number_format($total_self, 2) . '</td>
+                    <td>' . number_format($total_approved, 2) . '</td>
+                    <td>' . number_format($total_unapproved, 2) . '</td>
+                </tr>';
+        $out .= '</tbody>
+                  </table>
+            </div>';
+      }
+
+      return json_encode(array('status' => 'success', 'out' => $out));
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return 'Database error';
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return 'Error';
+    }
+  }
+
+  public function travelling_allowance_report()
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+
+      $travelling_allowance = $this->get_travelling_allowance();
+      $staff = $this->get_staff_list_userid();
+
+      return view('pages.travelling_allowance_report', compact('staff', 'travelling_allowance'));
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+
+  public function get_travelling_allowance_report(Request $request)
+  {
+    try {
+      if (session('username') == '') {
+        return redirect('/')->with('status', "Please login First");
+      }
+      //return $request->all();
+      $staff_id = $request->staff;
+
+      $from_date = $request->from_date;
+      $from_date = str_replace('/', '-', $from_date);
+      $from_date = date('Y-m-d', strtotime($from_date));
+
+      $to_date = $request->to_date;
+      $to_date = str_replace('/', '-', $to_date);
+      $to_date = date('Y-m-d', strtotime($to_date));
+      $out = '';
+
+      if ($staff_id == 'all') {
+        $staff = $this->get_staff_list_userid_company();
+      } else {
+        $staff = $this->get_staff_id_list_userid_company($staff_id);
+      }
+      $out .= '<div class="table-responsive">
+        <table class="table allowance-data-table">
+            <thead>
+                <th></th>
+                <th>Sr No.</th>
+                <th>Staff Name</th>
+                <th>Total Distance</th>
+            </thead>
+            <tbody>';
+      $i = 1;
+      foreach ($staff as $row1) {
+        if ($from_date != '' && $to_date == '') {
+          $total_distance = DB::table('travelling_allowance')->where('entry_by', $row1->sid)->where('date', '>=', $from_date)->where('company', session('default_company_id'))->where('status', 'approved')->sum('distance');
+        } else if ($from_date != '' && $to_date != '') {
+          $total_distance = DB::table('travelling_allowance')->where('entry_by', $row1->sid)->where('date', '>=', $from_date)->where('travelling_allowance.company', session('default_company_id'))->where('status', 'approved')->where('date', '<=', $to_date)->sum('distance');
+        } else {
+          $total_distance = DB::table('travelling_allowance')->where('entry_by', $row1->sid)->where('status', 'approved')->where('travelling_allowance.company', session('default_company_id'))->sum('distance');
+        }
+        $out .= '<tr>
+                    <td></td>
+                    <td>' . $i++ . '</td>
+                    <td>' . $row1->name . '</td>
+                    <td>' . $total_distance . '</td>
+                </tr>';
+      }
+      $out .= '</tbody>
+        </table>
+    </div>';
+
+      return json_encode(array('status' => 'success', 'out' => $out));
+    } catch (QueryException $e) {
+      Log::error("Database error ! [" . $e->getMessage() . "]");
+      return response()->json(array('error' => 'Database error'));
+    } catch (Exception $e) {
+      Log::error($e->getMessage());
+      return response()->json(array('error' => 'Error'));
+    }
+  }
+}

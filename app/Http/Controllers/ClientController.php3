@@ -1,0 +1,3445 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Session;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Storage;
+use Aws\S3\S3Client;
+use App\Traits\ClientTraits;
+use App\Traits\StaffTraits;
+use App\Traits\ExpenseTraits;
+use App\Traits\NotificationTraits;
+use DataTables;
+use Carbon\Carbon;
+use Exception;
+
+class ClientController extends Controller
+{
+
+    use StaffTraits;
+    use ClientTraits;
+    use ExpenseTraits;
+    use NotificationTraits;
+
+    public function get_leads(Request $request)
+    {
+        try {
+            Log::info('get leads function called');
+            if (session('username') == '') {
+                return redirect('/')->with('alert-danger', "Please Login first");
+            }
+
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $staff_id = session('staff_id');
+            $company = session('company_id');
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $source = DB::table('source')->select('id', 'source')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($page == 'leads') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, 'active', '', $request->client_id, '', '', '', '', '', '', '', '', '');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->staff_id != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $request->staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, '');
+                } else {
+                    $client_list = $this->get_clients_leads_by_status($company, $client_leads, 'active');
+                }
+
+                if ($client_list != '') {
+                    if ($request->wantsJson()) {
+                        return response()->json(array('status' => 'success', 'response' => $client_list));
+                    }
+                    return view('pages.clients.get_leads', compact('client_list', 'staff', 'leadtype', 'source'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'my_leads') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, 'active', $staff_id, $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, 'appointment_count_show');
+                } else {
+
+                    $client_list = $this->get_clients_leads_list($company, 'leads', 'active', $staff_id, '', '', '', '', '', '', '', '', '', 'appointment_count_show');
+                }
+
+                if ($client_list != '') {
+                    if ($request->wantsJson()) {
+                        return response()->json(array('status' => 'success', 'response' => $client_list));
+                    }
+                    return view('pages.clients.get_my_leads', compact('client_list', 'staff', 'leadtype'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'statistics') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    Log::info('page ' . $page);
+                    Log::info('client_id ' . json_encode($request->client_id));
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, '', '', $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->staff_id != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $request->staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, 'appointment_count_show');
+                } else {
+                    $client_list = $this->get_clients_leads_by_status($company, $client_leads, '');
+                }
+
+                if ($client_list != '') {
+                    Log::info($client_list);
+                    return view('pages.clients.get_statistics', compact('client_list'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'client') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    Log::info($client_leads);
+                    Log::info($status);
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, $status, '', $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } else {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, $status, '', '', '', '', '', '', '', '', '', '', 'appointment_count_show');
+                }
+                if ($client_list != '') {
+                    if ($request->wantsJson()) {
+                        return response()->json(array('status' => 'success', 'response' => $client_list));
+                    }
+                    return view('pages.clients.get_clients', compact('client_list', 'staff', 'selection_val'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function get_clients(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                'company' => 'required|numeric',
+
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $company = $request->company;
+            $client_list = $this->get_clients_leads_by_status($company, 'client', 'active');
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_all_clients(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                'company' => 'required|numeric',
+
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $company = $request->company;
+            $client_list = DB::table('clients')->select(DB::raw('CONCAT(case_no , " (" , client_name , ")") as client_case_no'), 'clients.id', 'clients.client_name', 'clients.case_no')->where('status', 'active')->get();
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_clients_leads(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                'company' => 'required|numeric',
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $company = $request->company;
+            $client_list = $this->get_clients_leads_by_status($company, '', 'active');
+
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_client_address(Request $request)
+    {
+        try {
+            $v = Validator::make($request->all(), [
+                'company' => 'required|numeric',
+
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $company = $request->company;
+
+            $client_list = $this->get_clients_leads_by_status($company, 'client', 'active');
+
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_client_full_detail(Request $request)
+    {
+
+        try {
+            $v = Validator::make($request->all(), [
+                'client_id' => 'required|numeric',
+
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $client_id = $request->client_id;
+            $client_list = DB::table('clients')->where('id', $client_id)->get();
+            foreach ($client_list as $row) {
+                $quotation_total = DB::table('quotation')
+                    ->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')
+                    ->where('quotation.client_id', $row->id)->where('quotation_details.finalize', 'yes')->sum('amount');
+                $row->finalized = $quotation_total;
+                $que_bill_arr = array();
+                $add_bill_arr = array();
+
+                $row->invoice_raised = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $que_bill_id = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($que_bill_id != '[]') {
+
+                    foreach ($que_bill_id as $qb) {
+
+                        $que_bill_arr[] = $qb->id;
+                    }
+                    $payment_received_on_quo = DB::table('bill_payment_mapping')
+                        ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_invoices_raised = $payment_received_on_quo;
+                } else {
+
+                    $row->payment_invoices_raised = 0;
+                }
+
+
+                $row->additional_invoices = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $add_bill_id = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($add_bill_id != '[]') {
+
+                    foreach ($add_bill_id as $ab) {
+                        $add_bill_arr[] = $ab->id;
+                    }
+                    $payment_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                        ->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_on_add = $payment_received_on_additional;
+                } else {
+                    $row->payment_on_add = 0;
+                }
+                $pstatus = 'approved';
+                $bstatus = 'unpaid';
+                $active = 'yes';
+                $row->due_amt = 0;
+                $payment_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                    ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->sum('bill_payment_mapping.paid_amount');
+                $due_bill_amount = DB::table('bill')->where('client', $row->id)->where('status', '!=', 'paid')->where('active', 'yes')->sum('total_amount');
+
+                $due_bill_amount -= $payment_amt;
+
+                $row->unapproved_payment = DB::table('payment')->where('client_id', $row->id)->where('status', '!=', 'approved')->where('active', 'yes')->sum('payment');
+                //log::info('client_id='.$row->id.'payment_amount='.$unapproved_payment);
+                $row->due_amt = $due_bill_amount;
+                $row->future_invoices = $row->finalized - $row->invoice_raised;
+            }
+
+            $i = 1;
+            $total_dues = 0;
+            $total_unapproved = 0;
+
+
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function mobile_client_search(Request $request)
+    {
+
+        try {
+            $v = Validator::make($request->all(), [
+                'mobile_no' => 'required|numeric',
+
+            ]);
+
+            if ($v->fails()) {
+                return $v->errors();
+            }
+            $mobile_no = $request->mobile_no;
+            $client_id = DB::table('client_contacts')->where('contact', $mobile_no)->value('client_id');
+            $client_list = DB::table('clients')->where('id', $client_id)->get();
+
+            foreach ($client_list as $row) {
+                $row->client_contact = DB::table('client_contacts')->where('client_id', $row->id)->get();
+                $quotation_total = DB::table('quotation')
+                    ->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')
+                    ->where('quotation.client_id', $row->id)->where('quotation_details.finalize', 'yes')->sum('amount');
+                $row->finalized = $quotation_total;
+                $que_bill_arr = array();
+                $add_bill_arr = array();
+
+                $row->invoice_raised = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $que_bill_id = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($que_bill_id != '[]') {
+
+                    foreach ($que_bill_id as $qb) {
+
+                        $que_bill_arr[] = $qb->id;
+                    }
+                    $payment_received_on_quo = DB::table('bill_payment_mapping')
+                        ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_invoices_raised = $payment_received_on_quo;
+                } else {
+
+                    $row->payment_invoices_raised = 0;
+                }
+
+
+                $row->additional_invoices = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $add_bill_id = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($add_bill_id != '[]') {
+
+                    foreach ($add_bill_id as $ab) {
+                        $add_bill_arr[] = $ab->id;
+                    }
+                    $payment_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                        ->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_on_add = $payment_received_on_additional;
+                } else {
+                    $row->payment_on_add = 0;
+                }
+                $pstatus = 'approved';
+                $bstatus = 'unpaid';
+                $active = 'yes';
+                $row->due_amt = 0;
+                $payment_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                    ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->sum('bill_payment_mapping.paid_amount');
+                $due_bill_amount = DB::table('bill')->where('client', $row->id)->where('status', '!=', 'paid')->where('active', 'yes')->sum('total_amount');
+
+                $due_bill_amount -= $payment_amt;
+
+                $row->unapproved_payment = DB::table('payment')->where('client_id', $row->id)->where('status', '!=', 'approved')->where('active', 'yes')->sum('payment');
+                //log::info('client_id='.$row->id.'payment_amount='.$unapproved_payment);
+                $row->due_amt = $due_bill_amount;
+                $row->future_invoices = $row->finalized - $row->invoice_raised;
+            }
+
+            $i = 1;
+            $total_dues = 0;
+            $total_unapproved = 0;
+
+
+            return response()->json(array('status' => 'success', 'clients' => $client_list));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function get_city(Request $request)
+    {
+        try {
+            $city = DB::table('city')->get();
+
+            return response()->json(array('status' => 'success', 'city' => $city));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function get_client_on_id(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            'client_id' => 'required|numeric',
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        try {
+            $client_id = $request->client_id;
+
+            $clients = $this->get_client_by_id($client_id);
+
+            return response()->json(array('status' => 'success', 'data' => $clients));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function mobile_client_add(Request $request)
+    { //TO INSERT CONTACT DETAILS
+
+        log::info($request->all());
+        $v = Validator::make($request->all(), [
+            'client_name' => 'required|string',
+            'services' => 'required|array',
+
+            'pincode' => 'required|numeric',
+            'created_by' => 'required|numeric'
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $client_name = $request->client_name;
+            $services = $request->services;
+            $no_of_units = $request->no_of_units;
+            $property_type = $request->property_type;
+            $area = $request->area;
+            $address = $request->address;
+            $city = $request->city;
+            $pincode = $request->pincode;
+            $remarks = $request->remarks;
+            $company = $request->company;
+            $status = 'active';
+            $date = date('Y-m-d');
+            $source = $request->source;
+            $location = $request->geolocation;
+            $short_code = DB::table('company')->where('id', $company)->value('short_code');
+            $case_prefix = $short_code . '/LEAD/' . date('Y') . '/';
+            $last_lead = DB::table('clients')->where('case_no', 'LIKE', $case_prefix . '%')->orderBy('id', 'desc')->value('case_no');
+            $last_lead = str_replace($case_prefix, "", $last_lead);
+            $last_lead = (int)$last_lead + 1;
+            $created_by = $request->created_by;
+
+            $no = str_pad($last_lead, 5, '0', STR_PAD_LEFT);
+            $case_no = $case_prefix . $no;
+
+            $insert = DB::table('clients')->insertGetId([
+                'client_name' => $client_name,
+                'default_company' => $company,
+                'case_no' => $case_no,
+                'address' => $address,
+                'city' => $city,
+                'area' => $area,
+                'pincode' => $pincode,
+                'no_of_units' => $no_of_units,
+                'property_type' => $property_type,
+                'status' => $status,
+                'services' => json_encode($services),
+                'date' => $date,
+                'remarks' => $remarks,
+                'source' => $source,
+                'location' => $location,
+                'created_by' => $created_by,
+                'created_at' => now()
+            ]);
+            $client_company_mapping = DB::table('client_company_mapping')->insert([
+                'client_id' => $insert,
+                'company' => $company
+            ]);
+            //multiple contact no.
+            // if(!empty($request->contact_no) || $request->contact_no != null){
+            //     $contact_no = $request->contact_no;
+            //     foreach ($contact_no as $val) {
+            //         if ($val != "" || $val != null) {
+            //           $contactInsert = DB::table('client_contacts')->insert([
+            //                 'client_id' => $insert,
+            //                 'name' => $client_name,
+            //                 'contact' => $val,
+            //                 'created_at' => now()
+            //             ]);
+            //         } 
+            //     }
+            // }
+            if ($insert) {
+                return response()->json(array('status' => 'success', 'msg' => 'Leads inserted successfully'));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Leads can`t be inserted'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+    public function mobile_addnew_leads(Request $request)
+    { //TO INSERT CONTACT DETAILS
+
+        log::info($request->all());
+        $v = Validator::make($request->all(), [
+            'client_name' => 'required|string',
+            'contact_no' => 'required|numeric',
+
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $name = $request->client_name;
+            $units = $request->no_of_units;
+            $area = $request->area;
+            $address = $request->address;
+            $city = $request->city;
+            $any_query = $request->remarks;
+            $lead_source = 'KaryaratApp';
+            $mobile_no = $request->contact_no;
+            $company=$request->company;
+            $short_code = DB::table('company')->where('id', $company)->value('short_code');
+            $case_prefix = $short_code . '/LEAD/' . date('Y') . '/';
+            $last_lead = DB::table('clients')->where('case_no', 'LIKE', $case_prefix . '%')->orderBy('id', 'desc')->value('case_no');
+            $last_lead = str_replace($case_prefix, "", $last_lead);
+            $last_lead = (int)$last_lead + 1;
+            $no = str_pad($last_lead, 5, '0', STR_PAD_LEFT);
+            $case_no = $case_prefix . $no;
+
+            $insert = DB::table('clients')->insertGetId([
+                'client_name' => $name,
+                'case_no'=>$case_no,
+                'address' => $address,
+                'city' => $city,
+                'area' => $area,
+                'no_of_units' => $units,
+                'remarks' => $any_query,
+                'status'=>'active',
+                'source' => $lead_source,
+                'client_leads'=>'leads',
+                'default_company'=>$company,
+                'date'=>date('Y-m-d'),
+                'created_at' => now()
+            ]);
+
+
+            if ($insert) {
+                $insert1=DB::table('client_contacts')->insert(['client_id'=>$insert,'name'=>$name,'contact'=>$mobile_no]);
+                $insert2=DB::table('client_company_mapping')->insert(['client_id'=>$insert,'company'=>$company]);
+                return response()->json(array('status' => 'success', 'msg' => 'Leads created successfully'));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Leads can`t be created'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function mobile_client_edit(Request $request)
+    {
+
+        log::info($request->all());
+        $v = Validator::make($request->all(), [
+            'client_name' => 'required|string',
+            'services' => 'required|array',
+            'client_id' => 'required|numeric',
+            'pincode' => 'required|numeric',
+            'created_by' => 'required|numeric'
+        ]);
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $client_name = $request->client_name;
+            $services = $request->services;
+            $no_of_units = $request->no_of_units;
+            $property_type = $request->property_type;
+            $area = $request->area;
+            $address = $request->address;
+            $city = $request->city;
+            $pincode = $request->pincode;
+            $remarks = $request->remarks;
+            $company = $request->company;
+            $status = 'active';
+            $date = date('Y-m-d');
+            $source = $request->source;
+            $location = $request->geolocation;
+            $client_id = $request->client_id;
+            $update = DB::table('clients')->where('id', $client_id)->update([
+                'client_name' => $client_name,
+                'default_company' => $company,
+                'address' => $address,
+                'city' => $city,
+                'area' => $area,
+                'pincode' => $pincode,
+                'no_of_units' => $no_of_units,
+                'property_type' => $property_type,
+                'status' => $status,
+                'services' => json_encode($services),
+                'date' => $date,
+                'remarks' => $remarks,
+                'source' => $source,
+                'location' => $location,
+
+                'created_at' => now()
+            ]);
+            $count = DB::table('client_company_mapping')->where('client_id', $client_id)->where('company', $company)->count();
+
+            if ($count == 0) {
+                $client_company_mapping = DB::table('client_company_mapping')->insert([
+                    'client_id' => $client_id,
+                    'company' => $company
+                ]);
+            }
+
+            if ($update) {
+                return response()->json(array('status' => 'success', 'msg' => 'Leads updated successfully'));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Leads can`t be updated'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function clientContact_insert(Request $request)
+    { //TO INSERT CONTACT DETAILS
+
+        $v = Validator::make($request->all(), [
+            'name' => 'required|array',
+            'contact' => 'required|array',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        echo $request['email'][0];
+        for ($i = 0; $i < count($request['name']); $i++) {
+            $id = DB::table('clients')->max('id'); //Geting max id from client
+            $inId = DB::table('client_contacts')->insertGetId([
+                'client_id' => $id, 'name' => $request['name'][$i],
+                'contact' => $request['contact'][$i], 'whatsapp' => $request['whatsapp'][$i], 'email' => $request['email'][$i]
+            ]); //Inserting in the max ID recived
+        }
+
+        return response()->json('Inserted');
+    }
+
+    public function clientContact_fetch(Request $request)
+    { //TO RECIVE CONTACT DETAILS BASED ON CLIENT ID   
+        $v = Validator::make($request->all(), [
+            'client_id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+
+        $contactDetails = DB::table('client_contacts')->where('client_id', $request->client_id)->get();
+
+        return response()->json(array('status' => 'success', 'data' =>  $contactDetails));
+    }
+
+    public function clients_add_index(Request $request)
+    {
+        try {
+            Log::Info('inside getclient');
+            if (session::get('username') != '') {
+                $leads = DB::table('quotation')->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')->where('quotation_details.finalize', 'yes')->distinct()->get(['client_id']);
+                foreach ($leads as $row) {
+                    DB::table('clients')->where('id', $row->client_id)->update([
+                        'client_leads' => 'client'
+                    ]);
+                }
+                $services = DB::table('services')->get();
+                $cities = DB::table('city')->get();
+                $company = DB::table('company')->get();
+                $property_type = DB::table('property_type')->get();
+                $sources = DB::table('source')->get();
+                return view('pages.clients.client-add', compact('services', 'cities', 'company', 'property_type', 'sources'));
+            } else {
+                return redirect('/')->with('status', "Please login First");
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        }
+    }
+
+
+    public function client_ledger(Request $request)
+    {
+
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+
+        $company_id = session('company_id');
+        $client_list = $this->get_clients_leads_by_status(0, 'client', 'active');
+        foreach ($client_list as $row) {
+            $row->client_case_no = $this->get_client_case_no_by_id($row->id);
+            $quotation_total = DB::table('quotation')
+                ->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')
+                ->where('quotation.client_id', $row->id)->where('quotation.company', $company_id)->where('quotation_details.finalize', 'yes')->sum('amount');
+            $row->finalize_quotation = $quotation_total;
+            $que_bill_arr = array();
+            $add_bill_arr = array();
+            $inv_on_quotation = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('bill.company', $company_id)->where('active', 'yes')->sum('total_amount');
+            $pro_inv_on_quotation = DB::table('proforma_invoice')->where('convert_tax', 'no')->where('client', $row->id)->where('quotation', '!=', 'null')->where('company', $company_id)->where('active', 'yes')->where('status', 'unpaid')->sum('total_amount');
+            $row->bill_on_quotation = $inv_on_quotation + $pro_inv_on_quotation;
+
+            $que_bill_id = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('bill.company', $company_id)->where('active', 'yes')->get(['id']);
+
+            if ($que_bill_id != '[]') {
+
+                foreach ($que_bill_id as $qb) {
+
+                    $que_bill_arr[] = $qb->id;
+                }
+                $payment_received_on_quo = DB::table('bill_payment_mapping')
+                    ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('payment.company', $company_id)->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.paid_amount');
+                $tds_received_on_quo = DB::table('bill_payment_mapping')
+                    ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.tds_amount');
+                $row->payment_on_quo = $payment_received_on_quo + $tds_received_on_quo;
+            } else {
+
+                $row->payment_on_quo = 0;
+            }
+
+            $additional_bill = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+            $additional_pro_inv = DB::table('proforma_invoice')->where('convert_tax', 'no')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+
+            $row->additional_bill = $additional_bill + $additional_pro_inv;
+            $add_bill_id = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('bill.company', $company_id)->get(['id']);
+
+            if ($add_bill_id != '[]') {
+
+                foreach ($add_bill_id as $ab) {
+                    $add_bill_arr[] = $ab->id;
+                }
+                $payment_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                    ->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.paid_amount');
+                $tds_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                    ->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.tds_amount');
+                $row->payment_on_add = $payment_received_on_additional + $tds_received_on_additional;
+            } else {
+                $row->payment_on_add = 0;
+            }
+            $pstatus = 'approved';
+            $bstatus = 'unpaid';
+            $active = 'yes';
+            $row->due_amt = 0;
+            $payment_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->where('bill.company', $company_id)->sum('bill_payment_mapping.paid_amount');
+            $tds_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->where('bill.company', $company_id)->sum('bill_payment_mapping.tds_amount');
+            $due_bill_amount = DB::table('bill')->where('client', $row->id)->where('status', '!=', 'paid')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+
+            $due_proforma_bill_amount = DB::table('proforma_invoice')->where('convert_tax', 'no')->where('client', $row->id)->where('status', 'unpaid')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+            $due_bill_amount += $due_proforma_bill_amount;
+
+            $payment_amt += $tds_amt;
+            $due_bill_amount -= $payment_amt;
+            $row->unapproved_payment = DB::table('payment')->where('client_id', $row->id)->where('status', '!=', 'approved')->where('active', 'yes')->where('payment.company', $company_id)->sum('payment');
+            //log::info('client_id='.$row->client.'payment_amount='.$unapproved_payment);
+            $row->due_amt = $due_bill_amount;
+            $row->future_invoices = $row->finalize_quotation - $row->bill_on_quotation;
+        }
+
+        $out = "";
+        $i = 1;
+        $total_dues = 0;
+        $total_unapproved = 0;
+
+        $sources = DB::table('source')->get();
+        return view('pages.clients.client_ledger', compact('client_list', 'sources'));
+    }
+
+    public function get_client_ledger(Request $request)
+    {
+
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+
+        $company_id = session('company_id');
+
+        $client_list = $this->get_clients_leads_by_status(0, 'client', 'active');
+
+        foreach ($client_list as $row) {
+            $row->client_case_no = $this->get_client_case_no_by_id($row->id);
+            $quotation_total = DB::table('quotation')
+                ->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')
+                ->where('quotation.client_id', $row->id)->where('quotation.company', $company_id)->where('quotation_details.finalize', 'yes')->sum('amount');
+            $row->finalize_quotation = $quotation_total;
+            $que_bill_arr = array();
+            $add_bill_arr = array();
+
+            $inv_on_quotation = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('bill.company', $company_id)->where('active', 'yes')->sum('total_amount');
+            $pro_inv_on_quotation = DB::table('proforma_invoice')->where('client', $row->id)->where('quotation', '!=', 'null')->where('company', $company_id)->where('active', 'yes')->where('status', 'unpaid')->sum('total_amount');
+            $row->bill_on_quotation = $inv_on_quotation + $pro_inv_on_quotation;
+            $que_bill_id = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('bill.company', $company_id)->where('active', 'yes')->get(['id']);
+
+            if ($que_bill_id != '[]') {
+
+                foreach ($que_bill_id as $qb) {
+
+                    $que_bill_arr[] = $qb->id;
+                }
+                $payment_received_on_quo = DB::table('bill_payment_mapping')
+                    ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('payment.company', $company_id)->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.paid_amount');
+                $tds_received_on_quo = DB::table('bill_payment_mapping')
+                    ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.tds_amount');
+                $row->payment_on_quo = $payment_received_on_quo + $tds_received_on_quo;
+            } else {
+
+                $row->payment_on_quo = 0;
+            }
+
+            $additional_bill = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+            $additional_pro_inv = DB::table('proforma_invoice')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+
+            $row->additional_bill = $addition_inv + $additional_pro_inv;
+            $add_bill_id = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->where('bill.company', $company_id)->get(['id']);
+
+            if ($add_bill_id != '[]') {
+
+                foreach ($add_bill_id as $ab) {
+                    $add_bill_arr[] = $ab->id;
+                }
+                $payment_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                    ->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.paid_amount');
+                $tds_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                    ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                    ->where('bill_payment_mapping.active', 'yes')->where('payment.company', $company_id)->where('payment.status', 'approved')
+                    ->sum('bill_payment_mapping.tds_amount');
+                $row->payment_on_add = $payment_received_on_additional + $tds_received_on_additional;
+            } else {
+                $row->payment_on_add = 0;
+            }
+            $pstatus = 'approved';
+            $bstatus = 'unpaid';
+            $active = 'yes';
+            $row->due_amt = 0;
+            $payment_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->where('bill.company', $company_id)->sum('bill_payment_mapping.paid_amount');
+            $tds_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->where('bill.company', $company_id)->sum('bill_payment_mapping.tds_amount');
+            $due_bill_amount = DB::table('bill')->where('client', $row->id)->where('status', '!=', 'paid')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+
+            $due_proforma_bill_amount = DB::table('proforma_invoice')->where('client', $row->id)->where('status', 'unpaid')->where('active', 'yes')->where('company', $company_id)->sum('total_amount');
+            $due_bill_amount += $due_proforma_bill_amount;
+            $payment_amt += $tds_amt;
+            $due_bill_amount -= $payment_amt;
+            $row->unapproved_payment = DB::table('payment')->where('client_id', $row->id)->where('status', '!=', 'approved')->where('active', 'yes')->where('payment.company', $company_id)->sum('payment');
+            //log::info('client_id='.$row->client.'payment_amount='.$unapproved_payment);
+            $row->due_amt = $due_bill_amount;
+            $row->future_invoices = $row->finalize_quotation - $row->bill_on_quotation;
+        }
+
+        $out = "";
+        $i = 1;
+        $total_dues = 0;
+        $total_unapproved = 0;
+
+        $sources = DB::table('source')->get();
+        return view('pages.clients.get_client_ledger', compact('client_list', 'sources'));
+    }
+
+
+    public function client_list_index(Request $request)
+    {
+
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+
+        $client_list = $this->get_clients_leads_by_status(0, 'client', 'active');
+
+        $clients = DB::table('clients')->where('client_leads', 'client')->where('status', 'active')->get();
+        $appointment_places = DB::table('appointment_places')->get();
+        $staff = $this->get_staff_list_userid();
+        $company = DB::table('company')->get();
+        return view('pages.clients.client-list', compact('client_list', 'clients', 'appointment_places', 'staff', 'company'));
+    }
+
+    public function leads_index(Request $request)
+    {
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+        if (session('role_id') == '8') {
+            return redirect()->route('my_leads_index');
+        }
+        $staff = $this->get_staff_list_userid();
+        $client_case = DB::table('clients')->select('id', 'case_no', 'client_name')->where('default_company', session('company_id'))->where('client_leads', 'leads')->where('status', 'active')->orderBy('id', 'desc')->get();
+        $source = DB::table('source')->get();
+        $address = DB::table('city')->get();
+        $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+
+        return view('pages.clients.leads', compact('client_case', 'staff', 'source', 'address', 'leadtype'));
+    }
+
+    public function my_leads_index(Request $request)
+    {
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+        $staff = $this->get_staff_list_userid();
+        $client_case = DB::table('clients')->select('id', 'case_no', 'client_name')->where('default_company', session('company_id'))->where('status', 'active')->orderBy('id', 'desc')->get();
+        $source = DB::table('source')->get();
+        $address = DB::table('city')->get();
+        $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+
+        return view('pages.clients.my_leads', compact('client_case', 'staff', 'source', 'address', 'leadtype'));
+    }
+
+    public function convert_client(Request $request)
+    {
+        try {
+            $client_id = $request->client_id;
+            $company_id = session('company_id');
+            $short_code = DB::table('company')->where('id', $company_id)->value('short_code');
+            $last_case_no = DB::table('company_case_no')->where('company_id', $company_id)->value('case_no');
+            $case_no1 = DB::table('company_case_no')->where('company_id', $company_id)->value('case_no') + 1;
+            if ($company_id == 3) {
+                $case_no1 = '000' . $case_no1;
+            }
+
+            $case_no = $short_code . '/' . date('Y') . '/' . $case_no1;
+            $convert = DB::table('clients')->where('id', $client_id)->update([
+                'case_no' => $case_no,
+                'client_leads' => 'client',
+                'converted_at' => date('Y-m-d')
+            ]);
+            if ($convert) {
+                $update_case_no_table = DB::table('company_case_no')->where('company_id', $company_id)->update([
+                    'case_no' => $case_no1
+                ]);
+
+
+                return response()->json(array('status' => 'success', 'msg' => 'Lead converted to client and case no is ' . $case_no));
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Client can`t be converted'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        }
+    }
+
+    public function autocomplete_client_name(Request $request)
+    {
+        $clients = DB::table('clients')
+            ->join('client_company_mapping', 'client_company_mapping.client_id', 'clients.id')
+            ->select('clients.client_name')
+            ->where('client_company_mapping.company', session('company_id'))->where('clients.status', 'active')->get();
+        $client_name_array = array();
+        foreach ($clients as $row) {
+            array_push($client_name_array, $row->client_name);
+        }
+        return $client_name_array = $client_name_array;
+    }
+    public function get_exist_client(Request $request)
+    {
+        log::info("Get already exist client");
+        try {
+            $client_name = $request->client_name;
+            $data = DB::table('clients')->where('client_name', $client_name)->get();
+            foreach ($data as $row) {
+                $row->services_id = json_decode($row->services);
+                $row->company_id = json_decode($row->default_company);
+                $row->date_format = date('d/m/Y', strtotime($row->date));
+                $row->client_visits = DB::table('client_visit')->where('client_id', $row->id)->value('enquery_details');
+                $location = json_decode($row->location);
+                if ($location != '') {
+
+                    $row->longitude = $location[0];
+                    $row->latitude = $location[1];
+                } else {
+                    $row->longitude = "";
+                    $row->latitude = "";
+                }
+                $count_contact = DB::table('client_contacts')->where('client_id', $row->id)->count();
+                if ($count_contact > 0) {
+                    $row->client_contacts = DB::table('client_contacts')->where('client_id', $row->id)->get();
+                } else {
+                    $row->client_contacts = '';
+                }
+            }
+            return $data;
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later')->withInput($request->all);
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later')->withInput($request->all);
+            }
+        }
+    }
+
+    public function client_add(Request $request)
+    {
+        log::info("Get already exist client");
+        try {
+            $client_name = $request->client_name;
+            $company = $request->company;
+            $name = $request->name;
+            $email = $request->email;
+            $contact = $request->contact;
+            $whatsapp = $request->whatsapp;
+            $check_committee_member = $request->check_committee_member;
+            $position = $request->position;
+            $address = $request->address;
+            $city = $request->city;
+            $var = $request->start_date;
+            $date = str_replace('/', '-', $var);
+            $date = date('Y-m-d', strtotime($date));
+            $client_enquiry = $request->client_enquiry;
+            $pdf_file = $request->file;
+            $service = $request->service;
+            $no_of_units = $request->no_of_units;
+            $property_type = $request->property_type;
+            $source = $request->source;
+            $longitude = $request->longitude;
+            $latitude = $request->latitude;
+            $created_by = session('staff_id');
+            if ($longitude != '') {
+                $geolocation = array($longitude, $latitude);
+                $geolocation = json_encode($geolocation);
+            } else {
+                $geolocation = '';
+            }
+
+            $find_client_name = DB::table('clients')->where('client_name', $client_name)->count();
+
+            if ($find_client_name > 0) {
+                return json_encode(array('status' => 'error', 'msg' => 'client name already exist'));
+            }
+
+            $short_code = DB::table('company')->where('id', $company)->value('short_code');
+            $case_prefix = $short_code . '/LEAD/' . date('Y') . '/';
+            $last_lead = DB::table('clients')->where('case_no', 'LIKE', $case_prefix . '%')->orderBy('id', 'desc')->value('case_no');
+            $last_lead = str_replace($case_prefix, "", $last_lead);
+            $last_lead = (int)$last_lead + 1;
+
+            $no = str_pad($last_lead, 5, '0', STR_PAD_LEFT);
+            $case_no = $case_prefix . $no;
+
+            $client_id = DB::table('clients')->insertGetId([
+                'client_name' => $client_name, 'default_company' => $company, 'case_no' => $case_no, 'address' => $address, 'city' => $city, 'no_of_units' => $no_of_units, 'property_type' => $property_type,
+                'status' => 'active', 'services' => json_encode($service), 'date' => $date, 'remarks' => $client_enquiry, 'source' => $source, 'location' => $geolocation, 'created_by' => $created_by, 'created_at' => now()
+            ]);
+
+            $client_company_mapping = DB::table('client_company_mapping')->insert([
+                'client_id' => $client_id,
+                'company' => $company
+            ]);
+            $clients = DB::table('clients')->get();
+            $client_name_array = array();
+            foreach ($clients as $cl) {
+                array_push($client_name_array, $cl->client_name);
+            }
+
+            if ($client_id) {
+                // $fileArr = [];
+                // for ($a = 0; $a < sizeof($pdf_file); $a++) {
+                //     $uploaded_file = $pdf_file[$a];
+                //     $fileOfName = $uploaded_file->getClientOriginalName();
+                //     $file_name =  explode('.', $fileOfName)[0];
+                //     $extension = strtolower($uploaded_file->getClientOriginalExtension());
+                //     $filename = $file_name . '_' . strtotime(date('Y-m-d H:i:s')) . '_' . $client_id . '.' . $extension;
+                //     $foldername = 'client-history';
+                //     $path = $foldername . '/' . $filename;
+                //     Storage::disk('s3_quotations')->put($path, fopen($uploaded_file, 'r+'), 'public');
+                //     $target_file = Storage::disk('s3_quotations')->url($path);
+                //     if ($target_file) {
+                //         $file = $filename;
+                //         array_push($fileArr, $file);
+                //     }
+                //     if (!empty($fileArr)) {
+                //         $client_file = DB::table('clients')->where('id', $client_id)->update(['client_history' => json_encode($fileArr)]);
+                //         if ($client_file > 0) {
+                //             log::info('file saved successfully');
+                //         } else {
+                //             log::info('file not saved');
+                //         }
+                //     }
+                // }
+                if ($name != [null]) {
+                    $j = 0;
+                    $committee_member = '';
+                    for ($i = 0; $i < sizeof($name); $i++) {
+                        if ($check_committee_member[$i] != '') {
+                            $committee_member = $check_committee_member[$i];
+                        }
+                        $client_contacts = DB::table('client_contacts')->insert([
+                            'client_id' => $client_id,
+                            'name'    => $name[$i],
+                            'contact' => $contact[$i],
+                            'whatsapp'    => $whatsapp[$i],
+                            'email' => $email[$i],
+                            'committee_member' => $committee_member,
+                            'position' => $position[$i],
+                            'created_at' => now()
+                        ]);
+
+
+                        if ($client_contacts) {
+                            $j++;
+                        }
+                    }
+                    if ($i == $j) {
+                        Log::info("Client and client contact Add Successfully");
+
+                        return json_encode(array('status' => 'success', 'msg' => 'Client detail inserted successfully', 'client_detail' => $client_name_array));
+                    } else {
+                        Log::error("Client and client contact can Not be add");
+
+                        return json_encode(array('status' => 'error', 'msg' => 'Client detail can`t be inserted'));
+                    }
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later')->withInput($request->all);
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later')->withInput($request->all);
+            }
+        }
+    }
+
+    public function update_clients(Request $request)
+    {
+        try {
+            Log::Info("Inside Update_client");
+           
+            $contact_id = $request->contact_id;
+            $client_id = $request->client_id;
+            $client_name = $request->client_name;
+            $case_no = $request->case_no;
+            $service = $request->service;
+            $var = $request->start_date;
+            $date = str_replace('/', '-', $var);
+            $date = date('Y-m-d', strtotime($date));
+            $city = $request->city;
+            $address = $request->address;
+            $name = $request->name;
+            $email = $request->email;
+            $contact = $request->contact;
+            $whatsapp = $request->whatsapp;
+            $pdf_file = $request->file;
+            $check_committee_member = $request->check_committee_member;
+            $position = $request->position;
+            $no_of_units = $request->no_of_units;
+            $property_type = $request->property_type;
+            $company = $request->company;
+            $client_enquiry = $request->client_enquiry;
+            $longitude = $request->longitude;
+            $latitude = $request->latitude;
+            $source = $request->source;
+            if ($longitude != '') {
+                $geolocation = array($longitude, $latitude);
+                $geolocation = json_encode($geolocation);
+            } else {
+                $geolocation = '';
+            }
+
+            if ($contact_id != '') {
+                $find_not_contact_id = DB::table('client_contacts')->where('client_id', $client_id)->whereNotIn('id', $contact_id)->get(['id']);
+                if ($find_not_contact_id != '' || $find_not_contact_id != '[]') {
+                    $delete_extra_contact = DB::table('client_contacts')->where('client_id', $client_id)->whereNotIn('id', $contact_id)->delete();
+                }
+            }
+         
+            if ($client_id) {
+                $fileArr = [];
+                $client_file = DB::table('clients')->where('id', $client_id)->value('client_history');
+                // $fileArr = json_decode($client_file, true);
+                // for ($a = 0; $a < sizeof($pdf_file); $a++) {
+                //     $uploaded_file = $pdf_file[$a];
+                //     $fileOfName = strtolower($uploaded_file->getClientOriginalName());
+                //     $file_name =  explode('.', $fileOfName)[0];
+                //     $extension = strtolower($uploaded_file->getClientOriginalExtension());
+                //     $filename = $file_name . '_' . strtotime(date('Y-m-d H:i:s')) . '_' . $client_id . '.' . $extension;
+                //     $foldername = 'client-history';
+                //     $path = $foldername . '/' . $filename;
+                //     Storage::disk('s3_quotations')->put($path, fopen($uploaded_file, 'r+'), 'public');
+                //     $target_file = Storage::disk('s3_quotations')->url($path);
+                //     if ($target_file) {
+                //         $file = $filename;
+                //         array_push($fileArr, $file);
+                //     }
+                //     if (!empty($fileArr)) {
+                //         $client_file = DB::table('clients')->where('id', $client_id)->update(['client_history' => json_encode($fileArr)]);
+                //         if ($client_file > 0) {
+                //             log::info('file saved successfully');
+                //             log::info($fileArr);
+                //         } else {
+                //             log::info('file not saved');
+                //         }
+                //     }
+                // }
+               
+                $update = DB::table('clients')->where('id', $client_id)->update([
+                    'client_name' => $client_name,
+                    'services' => json_encode($service),
+                    'address' => $address,
+                    'city' => $city,
+                    'date' => $date,
+                    'default_company' => $company,
+                    'no_of_units' => $no_of_units,
+                    'property_type' => $property_type,
+                    'remarks' => $client_enquiry,
+                    'source' => $source,
+                    'location' => $geolocation,
+                    'status' => 'active',
+                    'updated_at' => now()
+                ]);
+                $j = 0;
+
+                if ($update) {
+                  
+                    if ($contact_id != '') {
+
+                        $size = sizeof($contact_id);
+                        log::info('size ' . $size);
+                        for ($i = 0; $i < sizeof($contact_id); $i++) {
+                            if ($contact_id[$i] != "" || $contact_id[$i] != null) {
+                                $update_contact = DB::table('client_contacts')->where('id', $contact_id[$i])->update([
+                                    'name' => $name[$i],
+                                    'contact' => $contact[$i],
+                                    'whatsapp' => $whatsapp[$i],
+                                    'email' => $email[$i],
+                                    'committee_member' => $check_committee_member[$i],
+                                    'position' => $position[$i],
+                                    'updated_at' => now(),
+                                ]);
+                                if ($update_contact) {
+                                    $j++;
+                                }
+                            } else {
+                                $insert = DB::table('client_contacts')->insert([
+                                    'client_id' => $client_id,
+                                    'name' => $name[$i],
+                                    'contact' => $contact[$i],
+                                    'whatsapp' => $whatsapp[$i],
+                                    'email' => $email[$i],
+                                    'committee_member' => $check_committee_member[$i],
+                                    'position' => $position[$i],
+                                    'created_at' => now()
+                                ]);
+                                if ($insert) {
+                                    $j++;
+                                }
+                            }
+                        }
+                        Log::info($update . " updated Successfully") . '<br>';
+                        log::info($client_id);
+                        log::info('j ' . $j);
+
+                        if ($j == $size) {
+                            Log::info("Client Updated Successfully");
+
+                            return json_encode(array('status' => 'success', 'msg' => 'Client Updated Successfully'));
+                        } else {
+                            Log::error("Client can Not be Update");
+                            return json_encode(array('status' => 'error', 'msg' => 'Client can`t be Updated'));
+                        }
+                    } else {
+                        if ($name != '') {
+                            $size = sizeof($name);
+                            for ($i = 0; $i < sizeof($name); $i++) {
+                                $insert = DB::table('client_contacts')->insert([
+                                    'client_id' => $client_id,
+                                    'name' => $name[$i],
+                                    'contact' => $contact[$i],
+                                    'whatsapp' => $whatsapp[$i],
+                                    'email' => $email[$i],
+                                    'created_at' => now()
+                                ]);
+                                if ($insert) {
+                                    $j++;
+                                }
+                            }
+                            if ($j == $size) {
+                                Log::info("Client Updated Successfully");
+
+                                return json_encode(array('status' => 'success', 'msg' => 'Client Updated Successfully'));
+                            } else {
+                                Log::error("Client can Not be Update");
+                                return json_encode(array('status' => 'error', 'msg' => 'Client can`t be Updated'));
+                            }
+                        }
+                    }
+                }
+                if ($update) {
+                    return json_encode(array('status' => 'success', 'msg' => 'Client Updated Successfully'));
+                } else {
+                    return json_encode(array('status' => 'error', 'msg' => 'Client can`t be Updated'));
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            return json_encode(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+
+            return json_encode(array('status' => 'error', 'msg' => 'error'));
+        }
+    }
+
+    public function get_active_client(Request $request)
+    {
+        try {
+            $type = $request->value;
+            if ($type = 'unpaid') {
+                $client_list = DB::table('bill')
+                    ->join('clients', 'clients.id', 'bill.client')
+                    ->select('clients.*')
+                    ->where('bill.status', 'unpaid')->where('clients.status', 'active')->where('clients.client_leads', 'client')->where('bill.company', session('company_id'))->where('bill.active', 'yes')->distinct()->get();
+            } else {
+                $client_list = DB::table('clients')->where('default_company', session('company_id'))->where('client_leads', 'client')->where('status', $type)->get();
+            }
+
+            foreach ($client_list as $row) {
+                $quotation_total = DB::table('quotation')
+                    ->join('quotation_details', 'quotation_details.quotation_id', 'quotation.id')
+                    ->where('quotation.client_id', $row->id)->where('quotation_details.finalize', 'yes')->sum('amount');
+                $row->finalize_quotation = $quotation_total;
+                $que_bill_arr = array();
+                $add_bill_arr = array();
+
+                $row->bill_on_quotation = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $que_bill_id = DB::table('bill')->where('client', $row->id)->where('quotation', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($que_bill_id != '[]') {
+
+                    foreach ($que_bill_id as $qb) {
+
+                        $que_bill_arr[] = $qb->id;
+                    }
+                    $payment_received_on_quo = DB::table('bill_payment_mapping')
+                        ->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $que_bill_arr)->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_on_quo = $payment_received_on_quo;
+                } else {
+
+                    $row->payment_on_quo = 0;
+                }
+
+
+                $row->additional_bill = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->sum('total_amount');
+                $add_bill_id = DB::table('bill')->where('client', $row->id)->where('service', '!=', 'null')->where('active', 'yes')->get(['id']);
+
+                if ($add_bill_id != '[]') {
+
+                    foreach ($add_bill_id as $ab) {
+                        $add_bill_arr[] = $ab->id;
+                    }
+                    $payment_received_on_additional = DB::table('bill_payment_mapping')->join('payment', 'payment.id', 'bill_payment_mapping.payment_id')
+                        ->whereIn('bill_payment_mapping.bill_id', $add_bill_arr)
+                        ->where('bill_payment_mapping.active', 'yes')->where('payment.status', 'approved')
+                        ->sum('bill_payment_mapping.paid_amount');
+                    $row->payment_on_add = $payment_received_on_additional;
+                } else {
+                    $row->payment_on_add = 0;
+                }
+                $pstatus = 'approved';
+                $bstatus = 'unpaid';
+                $active = 'yes';
+                $row->due_amt = 0;
+                $payment_amt = DB::table('bill')->join('bill_payment_mapping', 'bill.id', 'bill_payment_mapping.bill_id')
+                    ->where('bill.client', $row->id)->where('bill.status', '!=', 'paid')->where('bill.active', 'yes')->where('bill_payment_mapping.active', 'yes')->sum('bill_payment_mapping.paid_amount');
+                $due_bill_amount = DB::table('bill')->where('client', $row->id)->where('status', '!=', 'paid')->where('active', 'yes')->sum('total_amount');
+
+                $due_bill_amount -= $payment_amt;
+
+                $row->unapproved_payment = DB::table('payment')->where('client_id', $row->id)->where('status', '!=', 'approved')->where('active', 'yes')->sum('payment');
+                //log::info('client_id='.$row->id.'payment_amount='.$unapproved_payment);
+                $row->due_amt = $due_bill_amount;
+                $row->future_invoices = $row->finalize_quotation - $row->bill_on_quotation;
+            }
+
+            $out = ' 
+             <div class="action-dropdown-btn d-none">
+                <div class="dropdown client-filter-action">
+                    <button class="btn border dropdown-toggle mr-1" type="button" id="client-filter-btn" data-toggle="dropdown"
+                        aria-haspopup="true" aria-expanded="false">
+                        <span class="selection">Active</span>
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-right" aria-labelledby="client-filter-btn">
+                        <a type="button" href="#" class="dropdown-item active_btn" data-value="active">Active</a>
+                        <a class="dropdown-item active_btn" data-value="inactive">In Active</a>
+                        <a href="#" class="dropdown-item active_btn" data-value="unpaid">Unpaid</a>
+                    </div>
+               </div>
+            
+                <div class="client-options">
+                    <a href="client_add" class="btn btn-icon btn-outline-primary mr-1" role="button" aria-pressed="true">
+                    <i class="bx bx-plus"></i>Add Client</a>
+                </div>
+            </div>
+            
+                    <div class="table-responsive">
+                        <table class="table client-data-table wrap">
+                            <thead>
+                                <tr>
+                                <th>Action</th> 
+                            <th>Name</th>';
+
+            if (session('role_id') == 1 || session('role_id') == 3) {
+                $out .= '<th>Finalized</th>
+               <th>Future Invoices</th>
+               <th>Invoices Raised</th>
+               <th>Payment</th>
+               <th>Additional Invoices</th>
+               <th>Payment</th>
+               <th>Dues</th>
+               <th>Unapproved Payment</th>';
+            }
+            $out .= '   
+             </tr>
+           </thead>
+           
+           <tbody>
+             ';
+            $i = 1;
+            $total_dues = 0;
+            $total_unapproved = 0;
+            foreach ($client_list as $client_item) {
+                $client_item->client_case_no = $this->get_client_case_no_by_id($client_item->id);
+                $total_dues += $client_item->due_amt;
+                $total_unapproved += $client_item->unapproved_payment;
+                $out .= '<tr><td style="white-space: nowrap;">
+                                <div class="client-action">
+                                    <a href="client_edit-' . $client_item->id . '" class="client-action-edit cursor-pointers btn btn-icon rounded-circle btn-warning glow mr-1" data-id=' . $client_item->id . ' data-tooltip="Edit">
+                                    <i class="bx bx-edit"></i>
+                                    <a href="#delete" class="client-action-edit cursor-pointers mr-1 btn btn-icon rounded-circle btn-danger glow" data-id=' . $client_item->id . ' data-tooltip="Delete">
+                                    <i class="bx bx-trash-alt"></i>
+                                    </a>
+                                    </div>
+                                </td>';
+
+
+                $out .= '<td><span class="client-customer">' . $client_item->client_case_no . '</span></td>';
+
+                if (session('role_id') == 1 || session('role_id') == 3) {
+                    $out .= '<td>' . number_format($client_item->finalize_quotation, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->future_invoices, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->bill_on_quotation, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->payment_on_quo, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->additional_bill, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->payment_on_add, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->due_amt, 2) . '</td>';
+                    $out .= '<td>' . number_format($client_item->unapproved_payment, 2) . '</td>';
+                }
+            }
+            $out .= ' </tr> </tbody>
+                </table>
+                </div>
+                <br>
+  
+                <div class="row">
+                    <div class="col-12 col-md-2 pt-0 mx-25">
+                    Total Dues: <span><b>' . number_format($total_dues, 2) . '</b></span>
+                    </div>
+                    
+                
+                </div>
+                ';
+            return json_encode(array('out' => $out));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return 'Database error';
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return 'Error';
+        }
+    }
+
+    public function delete_client(Request $request)
+    {
+        try {
+            $id = $request->id;
+            log::info("client_id=" . $id);
+            $delete = DB::table('clients')->where('id', $id)->update(['status' => 'inactive', 'updated_at' => now()]);
+            if ($request->wantsJson()) {
+                if ($delete) {
+                    return json_encode(array('status' => 'success'));
+                } else {
+                    return json_encode(array('status' => 'error'));
+                }
+            } else {
+                log::info("delete client by=" . session('username'));
+                if ($delete) {
+                    return json_encode(array('status' => 'success'));
+                } else {
+                    return json_encode(array('status' => 'error'));
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        }
+    }
+
+    public function get_source(Request $request)
+    {
+        try {
+            $sources = DB::table('source')->get();
+
+            return response()->json(array('status' => 'success', 'data' => $sources));
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function client_edit($id)
+    {
+        try {
+            if (session::get('username') != '') {
+                $services = DB::table('services')->get();
+                $cities = DB::table('city')->get();
+                $company = DB::table('company')->get();
+                $property_type = DB::table('property_type')->get();
+                $sources = DB::table('source')->get();
+                $client_data = DB::table('clients')
+                    ->join('city', 'city.id', '=', 'clients.city', 'left')
+                    ->join('company', 'company.id', '=', 'clients.default_company', 'left')
+                    ->join('property_type', 'property_type.id', '=', 'clients.property_type', 'left')
+                    ->join('source', 'source.id', '=', 'clients.source', 'left')
+                    ->select('clients.*', 'city.id as city_id', 'city.city_name', 'company.id as company_id', 'company.company_name', 'property_type.id as type_id', 'property_type.type', 'source.id as source_id', 'source.source as source_name')
+                    ->where('clients.id', $id)
+                    ->get();
+
+                foreach ($client_data as $val) {
+                    $val->services_id = json_decode($val->services);
+                    $val->date_format = date('d/m/Y', strtotime($val->date));
+                    //$val->client_visits = DB::table('client_visit')->where('client_id', $val->id)->value('enquery_details');
+                    $location = json_decode($val->location);
+
+                    if ($location != '') {
+                        $val->longitude = $location[0];
+                        $val->latitude = $location[1];
+                    } else {
+                        $val->longitude = "";
+                        $val->latitude = "";
+                    }
+
+                    $count_contact = DB::table('client_contacts')->where('client_id', $val->id)->count();
+
+                    $val->client_contacts = DB::table('client_contacts')->where('client_id', $val->id)->get();
+                    //$val->client_history = implode(" , ", json_decode($val->client_history, true));
+                }
+
+                return view('pages.clients.client-edit', compact('id', 'services', 'cities', 'company', 'property_type', 'sources', 'client_data', 'count_contact'));
+            } else {
+                return redirect('/')->with('status', "Please login First");
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        }
+    }
+
+
+    public function get_all_leads(Request $request)
+    {
+
+        $v = Validator::make($request->all(), [
+
+            'company_id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $company = $request->company_id;
+
+            $data = $this->get_clients_leads_by_status($company, 'leads', 'active');
+
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        }
+    }
+
+    public function my_leads(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            'staff_id' => 'required|numeric',
+            'company_id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+
+            $staff_id = $request->staff_id;
+            $company = $request->company_id;
+            $status = 'active';
+
+            $data = $this->get_clients_leads_list($company, 'leads', 'active', '', '', $staff_id, '', '', '', '', '', '', '', '');
+
+            return response()->json(array('status' => 'success', 'data' => $data));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        }
+    }
+
+    public function statistics_leads(Request $request)
+    {
+
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+        $staff = $this->get_staff_list_userid();
+        $client_case = $this->get_client_case_no();
+        $source = DB::table('source')->get();
+        $address = DB::table('city')->get();
+        $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+
+        return view('pages.clients.statistics_leads', compact('staff', 'client_case', 'source', 'address', 'leadtype'));
+    }
+
+    public function assign_leads_to_staff(Request $request)
+    {
+        try {
+            $staff_id = $request->staff_id;
+            $client_id = $request->client_id;
+            $company  = session('company_id');
+            $leadtype = $request->leadtype;
+            $status = $request->status;
+            $city = $request->city;
+            if ($client_id == null && $request->bulk_source != null) {
+                $bulk_source_ids = DB::table('clients')->join('client_company_mapping', 'client_company_mapping.client_id', 'clients.id')
+                    ->join('company', 'company.id', 'clients.default_company')
+                    ->where('client_company_mapping.company', $company)
+                    ->where('clients.source', $request->bulk_source)->select('clients.id as id');
+                if ($leadtype != null) {
+                    $bulk_source_ids = $bulk_source_ids->where('clients.lead_type', $leadtype);
+                }
+                if ($status != null) {
+                    $bulk_source_ids = $bulk_source_ids->where('clients.status', $status);
+                }
+                if ($city != null) {
+                    $bulk_source_ids = $bulk_source_ids->where('clients.city', $city);
+                }
+                $bulk_source_ids =  $bulk_source_ids->get();
+                $client_id = array_column(json_decode($bulk_source_ids, true), 'id');
+            }
+            $total = !empty($client_id) ? sizeof($client_id) : 0;
+            $added = false;
+            for ($i = 0; $i < $total; $i++) {
+                $update = DB::table('clients')
+                    ->where('id', $client_id[$i])
+                    ->update(['assign_to' => $staff_id, 'assigned_at' => now()]);
+
+                $update1 = DB::table('lead_history')->insert(['client_id' => $client_id[$i], 'assign_to' => $staff_id, 'created_at' => now()]);
+                Log::info('-------Push Notification: New_lead_assigned----');
+                $notification_data = $this->push_notification_list('New_lead_assigned');
+                $title = $notification_data['title'];
+                $body = $notification_data['body'];
+                $icon = $notification_data['icon'];
+                $click_action = $notification_data['click_action'];
+                $module = 'client';
+                $data1 = DB::table('clients')->where('id', $client_id[$i])->first(['case_no', 'client_name']);
+                $case_no = $data1->case_no;
+                $client_name = $data1->client_name;
+
+                $body = str_replace(['{case_no}', '{client_name}'], [$case_no, $client_name], $body);
+                $staffId = array($staff_id);
+                $this->send_push_notification($title, $body, $staffId, $click_action, $icon, $module);
+                $added = true;
+            }
+            if ($added) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead has been assigned successfully!!'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Lead can`t be assigned !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+    public function save_lead_type(Request $request)
+    {
+        try {
+            $client_id = $request->client_id;
+            $lead_type = $request->lead_type;
+
+            $update = DB::table('clients')
+                ->where('id', $client_id)
+                ->update(['lead_type' => $lead_type]);
+
+            if ($update) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead Type Updated successfully!!'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Lead can`t be updated !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+    public function lead_history(Request $request)
+    {
+        try {
+            $client_id = $request->client_id;
+
+            $client_list = DB::table('lead_history')
+                ->join('clients', 'clients.id', 'lead_history.client_id')
+                ->join('staff as created_by_staff', 'created_by_staff.sid', 'clients.created_by')
+                ->join('staff as assign_to_staff', 'assign_to_staff.sid', 'clients.assign_to')
+                ->select(DB::raw('CONCAT(case_no , " (" , client_name , ")") as client_case_no'), 'assign_to_staff.name as assign_staff_name', 'created_by_staff.name as created_by_name', 'lead_history.created_at')
+                ->where('lead_history.client_id', $client_id)
+                ->where('lead_history.status', 0)
+                ->orderBy('lead_history.id', 'desc')->get();
+
+            if ($client_list != '') {
+                return view('pages.clients.get_lead_history', compact('client_list'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while fetch lead history !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+
+    public function save_contact_detail(Request $request)
+    {
+        $v = Validator::make($request->all(), [
+            'client_id' => 'required|numeric',
+        ]);
+
+        if ($v->fails()) {
+            return $v->errors();
+        }
+        try {
+            $client_id = $request->client_id;
+            $name = $request->name;
+            $contact = $request->contact;
+            $whatsapp = $request->whatsapp;
+            $email = $request->email;
+            if ($name != '[]') {
+                $j = 0;
+                for ($i = 0; $i < sizeof($name); $i++) {
+                    $client_contacts = DB::table('client_contacts')->insert([
+                        'client_id' => $client_id,
+                        'name'    => $name[$i],
+                        'contact' => $contact[$i],
+                        'whatsapp'    => $whatsapp[$i],
+                        'email' => $email[$i],
+                        'created_at' => now()
+                    ]);
+                    if ($client_contacts) {
+                        $j++;
+                    }
+                }
+
+                if ($i == $j) {
+                    Log::info("Client and client conatact Add Successfully");
+
+                    return json_encode(array('status' => 'success', 'msg' => 'Client`s contact inserted successfully'));
+                } else {
+                    Log::error("Client and client conatact can Not be add");
+
+                    return json_encode(array('status' => 'error', 'msg' => 'Client`s contact can`t be inserted'));
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        }
+    }
+
+    public function get_lead_followup(Request $request)
+    {
+        try {
+            $client_id = $request->client_id;
+            $detail = $request->detail;
+            if ($detail == 'Follow-up') {
+                $data = DB::table('lead_follow_up')
+                    ->leftJoin('staff', 'staff.sid', 'lead_follow_up.contact_by')
+                    ->select('lead_follow_up.*')
+                    ->where('lead_follow_up.client_id', $client_id)
+                    ->orderBy('lead_follow_up.followup_date', 'desc')
+                    ->get();
+                foreach ($data as $row) {
+                    $row->contact_by_name = DB::table('leads')->where('id', $row->client_id)->value('name');
+                }
+                return view('pages.clients.get_lead_followup', compact('detail', 'data'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        }
+    }
+    public function get_quo_appo_foll(Request $request)
+    {
+        try {
+
+            $client_id = $request->client_id;
+            $detail = $request->detail;
+
+            if ($detail == 'Quotation') {
+                $data = DB::table('quotation')
+                    ->join('quotation_details', 'quotation.id', 'quotation_details.quotation_id')
+                    ->select('quotation.send_date', 'quotation.company', 'quotation_details.*')
+                    ->where('quotation.client_id', $client_id)->orderBy('quotation.send_date', 'desc')->get();
+
+                foreach ($data as $row) {
+                    $row->short_code = DB::table('company')->where('id', $row->company)->value('short_code');
+                    $row->quotation_no = $row->short_code . '-' . str_pad($row->quotation_no, 4, '0', STR_PAD_LEFT) . '/' . date('Y', strtotime($row->send_date));
+                    $row->service_name = DB::table('services')->where('id', $row->task_id)->value('name');
+                }
+
+                return view('pages.clients.get_quo_appo_foll', compact('detail', 'data'));
+            } elseif ($detail == 'Appointment') {
+                $data = DB::table('appointment')
+                    ->join('staff', 'staff.sid', 'appointment.meeting_with')
+                    ->join('appointment_places', 'appointment.place', 'appointment_places.id')
+                    ->select('staff.name as meeting_with_name', 'appointment.*', 'appointment_places.name as place_name')
+                    ->where('appointment.client', $client_id)->orderBy('meeting_date', 'desc')->get();
+
+                foreach ($data as $row) {
+                    $row->schedule_by_name = DB::table('staff')->where('sid', $row->schedule_by)->value('name');
+                }
+                return view('pages.clients.get_quo_appo_foll', compact('detail', 'data'));
+            } elseif ($detail == 'Follow-Up') {
+                $data = DB::table('follow_up')
+                    ->leftJoin('staff', 'staff.sid', 'follow_up.contact_by')
+                    ->select('follow_up.*', 'staff.name as contact_by_name')
+                    ->where('follow_up.client_id', $client_id)
+                    ->orderBy('follow_up.followup_date', 'desc')
+                    ->get();
+
+                foreach ($data as $row) {
+                    $contact_to_name = $row->contact_to;
+                    $contact_to_name = $contact_to_name;
+                    $row->contact_to_name = DB::table('client_contacts')->where('id', $contact_to_name)->value('name');
+                }
+                return view('pages.clients.get_quo_appo_foll', compact('detail', 'data'));
+                // } elseif ($detail == 'Cases') {
+                //     $data = DB::table('mycases')
+                //         ->select('mycases.*', 'clients.client_name', 'quotation.total_amt', 'quotation.send_date')
+                //         ->join('clients', 'clients.id', 'mycases.client_id')
+                //         ->leftJoin('quotation', 'quotation.id', 'mycases.quotation_id')
+                //         ->where('mycases.client_id', $client_id)
+                //         ->get();
+
+                //     return view('pages.clients.get_cases', compact('detail', 'data'));
+                // } else {
+                return json_encode(array('status' => 'error', 'msg' => 'Can not get ' . $detail . ' details !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+
+            return response()->json(array('status' => 'error', 'error' => 'Database error'));
+        }
+    }
+    public function get_cases(Request $request)
+    {
+        $client_id = $request->id;
+        log::info($client_id);
+        $data = DB::table('mycases')
+            ->leftjoin('clients', 'clients.id', 'mycases.client_id')
+            ->where('mycases.client_id', $client_id)
+            ->select('mycases.*', 'clients.client_name')
+            ->where('mycases.client_id', $client_id)
+            ->where('mycases.status', 'finalize')
+            ->get();
+        foreach ($data as $row) {
+            $row->quotation_details = DB::table('quotation_details')
+                ->join('services', 'services.id', 'quotation_details.task_id')
+                ->select('quotation_details.finalize', 'quotation_details.finalize_date', 'quotation_details.id', 'quotation_details.quotation_no', 'services.name')
+                ->where('quotation_details.id', $row->quotation_id)->get();
+        }
+        return view('pages.clients.get_cases', compact('data'));
+    }
+
+
+
+    public function get_client_contacts(Request $request)
+    {
+
+        try {
+            $client_id = $request->client_id;
+
+            $client_contacts = DB::table('client_contacts')
+                ->select('contact')
+                ->where('client_id', $client_id)
+                ->get();
+
+            $contact_array = array();
+            foreach ($client_contacts as $row) {
+                $contact_array[] = $row->contact;
+                $contacts = implode(',', $contact_array);
+            }
+
+            if ($client_contacts != '[]') {
+                return response()->json(array('status' => 'success', 'out' => $contacts));
+            } else {
+                return response()->json(array('status' => 'fail', 'out' => 'Client`s contact not found'));
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function get_credit_note_history(Request $request)
+    {
+        try {
+            $credit_note_ids = DB::table('bill')->where('client', $request->id)
+                ->get()->pluck('credit_note');
+            $list = DB::table('credit_note')->whereIn('id', $credit_note_ids)
+                ->get();
+            return view('pages.clients.credit_note_history', compact('list'));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return 'Database error';
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return 'Error';
+        }
+    }
+    public function get_writeoff_history(Request $request)
+    {
+        try {
+            $list = DB::table('payment')->where('client_id', $request->id)
+                ->orderby('id', 'desc')->where('payment_source', $request->history)->get();
+            return view('pages.clients.history_list', compact('list'));
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return 'Database error';
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return 'Error';
+        }
+    }
+
+    public function submit_lead_followUp(Request $request)
+    {
+
+        try {
+            $company = $request->company;
+            $client_id = $request->client_id;
+            if ($request->wantsJson()) {
+                $followup_date = $request->followup_date;
+                $contact_by = $request->contact_by;
+                $contact_by = DB::table('users')->where('id', $contact_by)->value('user_id');
+            } else {
+                $followup_date = $request->followup_date;
+                $followup_date = str_replace('/', '-', $followup_date);
+                $followup_date = date('Y-m-d', strtotime($followup_date));
+                $contact_by = $request->contact_by;
+            }
+
+            $next_followup_date = $request->next_followup_date;
+
+            if ($request->wantsJson()) {
+                $next_followup_date = $request->next_followup_date;
+            } else {
+                if ($next_followup_date != "") {
+                    $next_followup_date = str_replace('/', '-', $next_followup_date);
+                    $next_followup_date = date('Y-m-d', strtotime($next_followup_date));
+                }
+            }
+            $method = $request->method;
+            $finalized = $request->finalized;
+            $lead_closed = $request->lead_closed;
+            $discussion = $request->discussion;
+
+            // if ($next_followup_date == "" && $finalized == "") {
+            //     return response()->json(['status' => 'error', 'msg' => 'Please select next_follow-up date or check finalized']);
+            // }
+
+            $insert = DB::table('lead_follow_up')->insert([
+                'client_id' => $client_id,
+                'method' => $method,
+                'contact_by' => $contact_by,
+                'followup_date' => $followup_date,
+                'next_followup_date' => $next_followup_date,
+                'finalized' => $finalized,
+                'lead_closed' => $lead_closed,
+                'discussion' => $discussion,
+                'company' => $company,
+                'created_at' => now()
+            ]);
+
+            if ($insert) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead Follow-up detail submitted'));
+            } else {
+                return json_encode(array('status' => 'error', 'msg' => 'Lead Follow-up cannot be submitted'));
+            }
+        } catch (QueryException $e) {
+            Log::error($e->getMessage());
+            return json_encode(array('status' => 'error', 'msg' => 'Something went wrong while save follow up'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return json_encode(array('status' => 'error', 'msg' => 'Something went wrong while save follow up'));
+        }
+    }
+
+    public function new_leads(Request $request)
+    {
+        if (session('username') == '') {
+            return redirect('/')->with('alert-danger', "Please Login first");
+        }
+
+        $staff = $this->get_staff_list_userid();
+        $client_case = DB::table('clients')->select('id', 'case_no', 'client_name')->where('default_company', session('company_id'))->where('client_leads', 'leads')->where('status', 'active')->orderBy('id', 'desc')->get();
+        $source = DB::table('source')->get();
+        $company = DB::table('company')->get();
+        $address = DB::table('city')->get();
+        $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+        $leads_name = DB::table('leads')->where("status", NULL)->distinct()->get(['id', 'name']);
+        $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type')->where("leads.status", NULL)->whereNotIn('leads.lead_type', [5, 6])->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy("leads.id", "desc")->get();
+        foreach ($new_leads_list as $row) {
+            $row->followups = DB::table('lead_follow_up')->where('client_id', $row->id)->count();
+        }
+        return view('pages.clients.new_leads', compact('new_leads_list', 'client_case', 'staff', 'source', 'address', 'leadtype', 'leads_name', 'company'));
+    }
+    public function get_new_leads(Request $request)
+    {
+        try {
+            Log::info('get new leads function called');
+            if (session('username') == '') {
+                return redirect('/')->with('alert-danger', "Please Login first");
+            }
+            $status = $request->status;
+            $complete = $request->complete;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $city = $request->city;
+            $address = $request->address;
+            $leads_name = $request->leads_name;
+            $lead_type = $request->lead_type;
+            $staff_id = session('staff_id');
+            $source = $request->source;
+            $mobile_no = $request->mobile_no;
+            $from_date = '';
+            $to_date = '';
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($request->from_date == '' && $request->to_date == '') {
+                $from_date = '';
+                $to_date = '';
+            } else {
+                $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+            }
+
+
+            $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type');
+
+            if ($leads_name != '') {
+                $new_leads_list = $new_leads_list->whereIn('leads.id', $leads_name);
+            }
+            if ($from_date != '') {
+                $new_leads_list = $new_leads_list->whereDate('leads.created_at', '<=', $from_date);
+            }
+            if ($to_date != '') {
+                $new_leads_list = $new_leads_list->whereDate('leads.created_at', '>=', $to_date);
+            }
+            if ($city != '') {
+                $new_leads_list = $new_leads_list->where('leads.city', 'LIKE', "%{$city}%");
+            }
+            if ($address != '') {
+                $new_leads_list = $new_leads_list->where('leads.address', 'LIKE', "%{$address}%");
+            }
+            if ($source != '') {
+                $new_leads_list = $new_leads_list->where('leads.from', $source);
+            }
+            if ($mobile_no != '') {
+                $new_leads_list = $new_leads_list->where('leads.mobile_no', $mobile_no);
+            }
+            if ($complete != '') {
+                $new_leads_list = $new_leads_list->where('leads.complete', $complete);
+            }
+            if ($lead_type != '') {
+                $new_leads_list = $new_leads_list->where('leads.lead_type', $lead_type);
+            }
+            $new_leads_list = $new_leads_list->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy('leads.id', 'desc')->get();
+            if ($new_leads_list != '') {
+                return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+
+    public function delete_leads(Request $request)
+    {
+        try {
+            log::info("leads_id=" . $request->id);
+            $delete = DB::table('leads')->where('id', $request->id)->delete();
+            if ($request->wantsJson()) {
+                if ($delete) {
+                    return json_encode(array('status' => 'success'));
+                } else {
+                    return json_encode(array('status' => 'error'));
+                }
+            } else {
+                log::info("delete leads by=" . session('username'));
+                if ($delete) {
+                    return json_encode(array('status' => 'success'));
+                } else {
+                    return json_encode(array('status' => 'error'));
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        }
+    }
+
+    public function leads_edit($id)
+    {
+        try {
+            if (session::get('username') != '') {
+                $services = DB::table('services')->get();
+                $cities = DB::table('city')->get();
+                $company = DB::table('company')->get();
+                $property_type = DB::table('property_type')->get();
+                $sources = DB::table('source')->get();
+                $lead_types = DB::table('lead_type')->orderBy('id', 'desc')->get();
+                $leads_data = DB::table('leads')->where('id', $id)->get();
+                $services = DB::table('services')->get();
+                if (!$leads_data) {
+                    return redirect()->back()->with('alert-danger', 'Lead not found');
+                }
+                return view('pages.clients.leads_edit', compact('id', 'services', 'cities', 'company', 'property_type', 'sources', 'leads_data', 'lead_types'));
+            } else {
+                return redirect('/')->with('status', "Please login First");
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                Log::error($e->getMessage());
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+
+            if ($request->wantsJson()) {
+                return response()->json(array('status' => 'failure', 'error' => 'Database error'));
+            } else {
+                return redirect()->back()->with('alert-danger', 'something went wrong. try again later');
+            }
+        }
+    }
+
+    public function update_leads(Request $request)
+    {
+        try {
+            Log::Info("Inside Update_new_leads");
+
+            $update = DB::table('leads')->where('id', $request->id)->update([
+                'name' => $request->name,
+                'society_name' => $request->society_name,
+                'email' => $request->email,
+                'dob' => $request->dob,
+                'mobile_no' => $request->mobile_no,
+                'units' => $request->units,
+                'from' => $request->from,
+                'lead_source' => $request->lead_source,
+                'lead_type' => $request->leadtype,
+                'services' => $request->services,
+                'role' => $request->role,
+                'city' => $request->city,
+                'area' => $request->area,
+                'address' => $request->address,
+                'any_query' => $request->any_query,
+                'check_commitee_member' => $request->check_commitee_member,
+                'status' => $request->status,
+                'fb_id' => $request->fb_id,
+                'ad_id' => $request->ad_id,
+                'ad_name' => $request->ad_name,
+                'adset_id' => $request->adset_id,
+                'adset_name' => $request->adset_name,
+                'campaign_id' => $request->campaign_id,
+                'campaign_name' => $request->campaign_name,
+                'form_id' => $request->form_id,
+                'form_name' => $request->form_name,
+                'updated_at' => now()
+            ]);
+            if ($update) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead Updated Successfully'));
+            } else {
+                return json_encode(array('status' => 'error', 'msg' => 'Lead can`t be Updated'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return json_encode(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+            return json_encode(array('status' => 'error', 'msg' => 'error'));
+        }
+    }
+
+    public function save_new_lead_type(Request $request)
+    {
+        try {
+            $update = DB::table('leads')
+                ->where('id', $request->id)
+                ->update(['lead_type' => $request->lead_type]);
+            if ($update) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead New Type Updated successfully!!'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Lead can`t be updated !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+    // public function convert_newleads_client(Request $request)
+    // {
+    //     try {
+    //         $leads = DB::table('leads')->where('id', $request->id)->first();
+    //         $company_id = session('company_id');
+    //         $short_code = DB::table('company')->where('id', $company_id)->value('short_code');
+    //         $last_case_no = DB::table('company_case_no')->where('company_id', $company_id)->value('case_no');
+    //         $case_no1 = DB::table('company_case_no')->where('company_id', $company_id)->value('case_no') + 1;
+    //         if ($company_id == 3) {
+    //             $case_no1 = '000' . $case_no1;
+    //         }
+    //         $case_no = $short_code . '/' . date('Y') . '/' . $case_no1;
+    //         $convert = DB::table('clients')->insert([
+    //             'case_no' => $case_no,
+    //             'client_name' => $leads->name,
+    //             'lead_type' => $leads->lead_type,
+    //             'default_company' => $company_id,
+    //             'client_leads' => 'client',
+    //             'address' =>  $leads->address . ' ,City:' . $leads->city,
+    //             'area' => $leads->area,
+    //             'no_of_units' => $leads->units,
+    //             'status' => 'active',
+    //             'date' => date('Y-m-d'),
+    //             'remarks' => $leads->any_query,
+    //             'created_at' => now(),
+    //             'converted_at' => date('Y-m-d')
+    //         ]);
+    //         if ($convert) {
+    //             $update_leads_table = DB::table('leads')->where('id', $request->id)->update([
+    //                 'convert_client' => 'yes'
+    //             ]);
+    //             return response()->json(array('status' => 'success', 'msg' => 'Lead converted to client and case no is ' . $case_no));
+    //         } else {
+    //             return response()->json(array('status' => 'error', 'msg' => 'Client can`t be converted'));
+    //         }
+    //     } catch (QueryException $e) {
+    //         Log::error("Database error ! [" . $e->getMessage() . "]");
+    //         return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+    //     } catch (Exception $e) {
+    //         Log::error($e->getMessage());
+    //         return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+    //     }
+    // }
+
+
+    public function convert_newleads_client(Request $request)
+    {
+        try {
+            log::info('inside convert_newleads_client');
+            if (date('m') <= 3) {
+                $year = date('Y') - 1;
+                $year1 = date('Y');
+            } else {
+                $year = date('Y');
+                $year1 = date('Y') + 1;
+            }
+            $leads = DB::table('leads')->where('id', $request->id)->first();
+            $company_id = $request->company_id;
+            $short_code = DB::table('company')->where('id', $company_id)->value('short_code');
+            $last_case_no = DB::table('company_case_no')->where('company_id', $company_id)->value('case_no');
+            $case_prefix = $short_code . '/LEAD/' . $year . '/';
+            $last_lead = DB::table('clients')->where('case_no', 'LIKE', $case_prefix . '%')->orderBy('id', 'desc')->value('case_no');
+            $last_lead = str_replace($case_prefix, "", $last_lead);
+            $last_lead = (int)$last_lead + 1;
+
+            $no = str_pad($last_lead, 5, '0', STR_PAD_LEFT);
+            $case_no = $case_prefix . $no;
+            $services = NULL;
+
+            $leadData = json_decode(json_encode($leads), true);
+            if ($leadData['services'] != '') {
+                $services = json_encode($leadData['services']);
+            }
+            $source_id = NULL;
+            if ($leadData['from'] == 'fb') {
+                $leadData['from'] == 'facebook';
+            }
+            if ($leadData['from'] == 'web' || $leadData['from'] == 'app' || $leadData['from'] == 'facebook') {
+                $source_id = DB::table('source')->where('source', 'like', $leadData['from'])->value('id');
+            }
+
+            $arr = [
+                'case_no' => $case_no,
+                'physical_file_no' => NULL,
+                'client_name' => $leadData['society_name'],
+                'lead_type' => '1',
+                'default_company' => $company_id,
+                'client_leads' => 'leads',
+                'address' => $leadData['address'] . ' ,city:' . $leadData['city'],
+                'area' =>  $leadData['area'],
+                'pincode' =>  NULL,
+                'no_of_units' => $leadData['units'],
+                'property_type' =>  NULL,
+                'services' =>  $services,
+                'remarks' => NULL,
+                'source' =>  $source_id,
+                'location' => NULL,
+                'status' => 'active',
+                'date' => date('Y-m-d'),
+                'created_by' => session('user_id'),
+                'assign_to' => NULL,
+                'assigned_at' => NULL,
+                'converted_at' => date('Y-m-d'),
+                'fb_id' => $leadData['fb_id'],
+                'ad_id' => $leadData['ad_id'],
+                'ad_name' => $leadData['ad_name'],
+                'adset_id' => $leadData['adset_id'],
+                'adset_name' => $leadData['adset_name'],
+                'campaign_id' => $leadData['campaign_id'],
+                'campaign_name' => $leadData['campaign_name'],
+                'form_id' => $leadData['form_id'],
+                'form_name' => $leadData['form_name'],
+                'check_commitee_member' => $leadData['check_commitee_member'],
+                'dob' => $leadData['dob']
+            ];
+
+            $data = DB::table('clients')->insertGetID($arr);
+            $insert_mapping = DB::table('client_company_mapping')->insert(['client_id' => $data, 'company' => $company_id]);
+            if ($data != '') {
+                $name = $leadData['name'];
+                $mobile = $leadData['mobile_no'];
+                $email = $leadData['email'];
+                $find = DB::table('client_contacts')->where('contact', $mobile)->count();
+                if ($find == 0) {
+                    $insert_contact = DB::table('client_contacts')->insert(['client_id' => $data, 'name' => $name, 'contact' => $mobile, 'email' => $email, 'committee_member' => $leadData['check_commitee_member']]);
+                    if ($insert_contact) {
+                        $delete = DB::table('leads')->where('id', $request->id)->delete();
+                    } else {
+                        return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while Save contact detail !!'));
+                    }
+                } else {
+                    $delete = DB::table('leads')->where('id', $request->id)->delete();
+                }
+
+                if ($delete) {
+                    return response()->json(array('status' => 'success', 'msg' => 'Lead converted to client and case no is ' . $case_no));
+                } else {
+                    return response()->json(array('status' => 'error', 'msg' => 'Client can`t be converted'));
+                }
+            } else {
+                return response()->json(array('status' => 'error', 'msg' => 'Client can`t be converted'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('status' => 'error', 'msg' => 'Database error'));
+        }
+    }
+
+
+
+    public function assign_newleads_to_staff(Request $request)
+    {
+        try {
+            $leads_id = $request->leads_id;
+            if ($leads_id == null && $request->bulk_source != null) {
+                $bulk_source_ids =  DB::table('leads')->where('from', $request->bulk_source)->select('id')->get();
+                $leads_id = array_column(json_decode($bulk_source_ids, true), 'id');
+            }
+            $total = !empty($leads_id) ? sizeof($leads_id) : 0;
+            $added = false;
+            for ($i = 0; $i < $total; $i++) {
+                $update = DB::table('leads')
+                    ->where('id', $leads_id[$i])
+                    ->update(['assign_to' => $request->staff_id, 'assign_at' => now()]);
+                $update1 = DB::table('new_lead_history')->insert(['new_leads_id' => $leads_id[$i], 'assign_to' => $request->staff_id, 'created_at' => now()]);
+                $added = true;
+            }
+            if ($added) {
+                return json_encode(array('status' => 'success', 'msg' => 'Lead has been assigned successfully!!'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Lead can`t be assigned !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+    public function new_lead_history(Request $request)
+    {
+        try {
+            $lead_list = DB::table('new_lead_history')
+                ->join('leads', 'leads.id', 'new_lead_history.new_leads_id')
+                ->join('staff as assign_to_staff', 'assign_to_staff.sid', 'new_lead_history.assign_to')
+                ->select('leads.name', 'assign_to_staff.name as assign_staff_name', 'new_lead_history.created_at')
+                ->where('new_lead_history.new_leads_id', $request->lead_id)
+                ->where('new_lead_history.status', 0)
+                ->orderBy('new_lead_history.id', 'desc')->get();
+            if ($lead_list != '') {
+                return view('pages.clients.get_new_lead_history', compact('lead_list'));
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while fetch lead history !!'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+    public function assign_leads_to_company(Request $request)
+    {
+        try {
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $city = $request->city;
+            $address = $request->address;
+            $leads_name = $request->leads_name;
+
+            $company = $request->company_id;
+            $lead_id = $request->lead_id;
+            $from_date = '';
+            $to_date = '';
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($request->from_date == '' && $request->to_date == '') {
+                $from_date = '';
+                $to_date = '';
+            } else {
+                $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+            }
+            if ($company == 0) {
+                $company = session('company_id');
+            }
+            $j = 0;
+
+            for ($i = 0; $i < sizeof($lead_id); $i++) {
+                $assign = DB::table('leads')->where('id', $lead_id[$i])->update(['company' => $company]);
+                if ($assign) {
+                    $j++;
+                }
+            }
+            if ($j == $i) {
+                $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type');
+
+                if ($leads_name != '') {
+                    $new_leads_list = $new_leads_list->whereIn('leads.id', $leads_name);
+                }
+                if ($from_date != '' && $to_date != '') {
+                    $new_leads_list = $new_leads_list->whereBetween('leads.created_at', [$from_date, $to_date]);
+                }
+                if ($city != '') {
+                    $new_leads_list = $new_leads_list->where('leads.city', 'LIKE', "%{$city}%");
+                }
+                if ($address != '') {
+                    $new_leads_list = $new_leads_list->where('leads.address', 'LIKE', "%{$address}%");
+                }
+                $new_leads_list = $new_leads_list->where("leads.status", null)->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy('leads.id', 'desc')->get();
+                if ($new_leads_list != '') {
+                    return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Company can`t be assigned'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+    public function multi_convert_client(Request $request)
+    {
+        try {
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $city = $request->city;
+            $address = $request->address;
+            $leads_name = $request->leads_name;
+
+            $company = $request->company_id;
+            $lead_id = $request->lead_id;
+            $from_date = '';
+            $to_date = '';
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($request->from_date == '' && $request->to_date == '') {
+                $from_date = '';
+                $to_date = '';
+            } else {
+                $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+            }
+            if ($company == 0) {
+                $company = session('company_id');
+            }
+            $j = 0;
+            if (date('m') <= 3) {
+                $year = date('Y') - 1;
+                $year1 = date('Y');
+            } else {
+                $year = date('Y');
+                $year1 = date('Y') + 1;
+            }
+            for ($i = 0; $i < sizeof($lead_id); $i++) {
+
+                $leads = DB::table('leads')->where('id', $lead_id[$i])->first();
+
+                $short_code = DB::table('company')->where('id', $company)->value('short_code');
+                $last_case_no = DB::table('company_case_no')->where('company_id', $company)->value('case_no');
+                $case_prefix = $short_code . '/LEAD/' . $year . '/';
+                $last_lead = DB::table('clients')->where('case_no', 'LIKE', $case_prefix . '%')->orderBy('id', 'desc')->value('case_no');
+                $last_lead = str_replace($case_prefix, "", $last_lead);
+                $last_lead = (int)$last_lead + 1;
+
+                $no = str_pad($last_lead, 5, '0', STR_PAD_LEFT);
+                $case_no = $case_prefix . $no;
+                $services = NULL;
+                $leadData = json_decode(json_encode($leads), true);
+                if ($leadData['services'] != '') {
+                    $services = json_encode($leadData['services']);
+                }
+                $source_id = NULL;
+                if ($leadData['from'] == 'fb') {
+                    $leadData['from'] == 'facebook';
+                }
+                if ($leadData['from'] == 'web' || $leadData['from'] == 'app' || $leadData['from'] == 'facebook') {
+                    $source_id = DB::table('source')->where('source', 'like', $leadData['from'])->value('id');
+                }
+                $arr = [
+                    'case_no' => $case_no,
+                    'physical_file_no' => NULL,
+                    'client_name' => $leadData['society_name'],
+                    'lead_type' => '1',
+                    'default_company' => $company,
+                    'client_leads' => 'leads',
+                    'address' => $leadData['address'] . ' ,city:' . $leadData['city'],
+                    'area' =>  $leadData['area'],
+                    'pincode' =>  NULL,
+                    'no_of_units' => $leadData['units'],
+                    'property_type' =>  NULL,
+                    'services' =>  $services,
+                    'remarks' => NULL,
+                    'source' =>  $source_id,
+                    'location' => NULL,
+                    'status' => 'active',
+                    'date' => date('Y-m-d'),
+                    'created_by' => session('user_id'),
+                    'assign_to' => NULL,
+                    'assigned_at' => NULL,
+                    'converted_at' => date('Y-m-d'),
+                    'fb_id' => $leadData['fb_id'],
+                    'ad_id' => $leadData['ad_id'],
+                    'ad_name' => $leadData['ad_name'],
+                    'adset_id' => $leadData['adset_id'],
+                    'adset_name' => $leadData['adset_name'],
+                    'campaign_id' => $leadData['campaign_id'],
+                    'campaign_name' => $leadData['campaign_name'],
+                    'form_id' => $leadData['form_id'],
+                    'form_name' => $leadData['form_name'],
+
+                    'dob' => $leadData['dob']
+                ];
+
+                $convert = DB::table('clients')->insertGetId($arr);
+                $insert_mapping = DB::table('client_company_mapping')->insert(['client_id' => $convert, 'company' => $company]);
+                if ($convert) {
+                    $name = $leadData['name'];
+                    $mobile = $leadData['mobile_no'];
+                    $email = $leadData['email'];
+                    $find = DB::table('client_contacts')->where('contact', $mobile)->count();
+                    if ($find == 0) {
+                        $insert_contact = DB::table('client_contacts')->insert(['client_id' => $convert, 'name' => $name, 'contact' => $mobile, 'email' => $email, 'committee_member' => $leadData['check_commitee_member']]);
+                        if ($insert_contact) {
+                            $delete = DB::table('leads')->where('id', $lead_id[$i])->delete();
+                            if ($delete) {
+                                $j++;
+                            }
+                        } else {
+                            return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while Save contact detail !!'));
+                        }
+                    } else {
+                        $delete = DB::table('leads')->where('id', $lead_id[$i])->delete();
+                        if ($delete) {
+                            $j++;
+                        }
+                    }
+                }
+            }
+            if ($j == $i) {
+                $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type');
+
+                if ($leads_name != '') {
+                    $new_leads_list = $new_leads_list->whereIn('leads.id', $leads_name);
+                }
+                if ($from_date != '' && $to_date != '') {
+                    $new_leads_list = $new_leads_list->whereBetween('leads.created_at', [$from_date, $to_date]);
+                }
+                if ($city != '') {
+                    $new_leads_list = $new_leads_list->where('leads.city', 'LIKE', "%{$city}%");
+                }
+                if ($address != '') {
+                    $new_leads_list = $new_leads_list->where('leads.address', 'LIKE', "%{$address}%");
+                }
+                $new_leads_list = $new_leads_list->where("leads.status", null)->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy('leads.id', 'desc')->get();
+                if ($new_leads_list != '') {
+                    return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else {
+                return json_encode(array('status' => 'fail', 'msg' => 'Company can`t be converted'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+    public function get_leads_list(Request $request)
+    {
+        try {
+            Log::info('get leads function called1');
+            if (session('username') == '') {
+                return redirect('/')->with('alert-danger', "Please Login first");
+            }
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $staff_id = session('staff_id');
+            $company = session('company_id');
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $source = DB::table('source')->select('id', 'source')->get();
+            $staff = $this->get_staff_list_userid();
+
+            if ($page == 'leads') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, 'active', '', $request->client_id, '', '', '', '', '', '', '', '', '');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->staff_id != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $request->staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, '');
+                } else {
+                    $client_list = $this->get_clients_leads_by_status($company, $client_leads, 'active');
+                }
+
+                if ($client_list != '') {
+                    return Datatables::of($client_list)->addIndexColumn()
+                        ->addColumn('action', function ($row) {
+                            $btn = '<input type="hidden" class="form-control clientID" value="' . $row->id . '"><div class="row client-action ml-0"><a href="client_edit-' . $row->id . '" class="client-action-edit btn btn-icon rounded-circle glow btn-warning" data-tooltip="Edit">
+                            <i class="bx bx-edit"></i>
+                        </a>';
+                            if (session('role_id') == 1 || session('role_id') == 3) {
+                                $btn .= '<a href="#" class="btn btn-icon rounded-circle glow btn-danger  delete_client" data-id="' . $row->id . '" data-tooltip="Delete">
+                            <i class="bx bx-trash-alt"></i>
+                        </a>
+                        <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-secondary convert_client" data-tooltip="Convert to client">
+                            <i class="bx bx-transfer"></i>
+                        </button>';
+                            }
+                            if (session('role_id') == 1 || session('role_id') == 3 || session('role_id') == 8) {
+                                $btn .= '<div class="save_lead_div" style="display:none;">
+                            <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-success save_lead_type" data-tooltip="Save Lead Type">
+                                <i class="bx bx-save"></i>
+                            </button>
+                            <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-danger close_lead_type" data-tooltip="Close Lead Type">
+                                <i class="bx bx-window-close"></i>
+                            </button>
+                        </div>
+                        <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-primary change_lead_type" data-tooltip="Change Lead Type">
+                            <i class="bx bx-analyse"></i>
+                        </button>';
+                            }
+                            $btn .= '</div>';
+                            return $btn;
+                        })
+                        ->addColumn('checkbox', '<input type="checkbox" name="clientID[]" class="form-control clientID" value="{{$id}}" />')
+                        ->rawColumns(['checkbox', 'action'])
+                        ->editColumn('created_at', function ($data) {
+                            return date('d-m-Y', strtotime($data->created_at));
+                        })
+                        ->editColumn('assigned_at', function ($data) {
+                            return date('d-m-Y', strtotime($data->assigned_at));
+                        })
+                        ->make(true);
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'my_leads') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, 'active', $staff_id, $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, 'appointment_count_show');
+                } else {
+                    $client_list = $this->get_clients_leads_list($company, 'leads', 'active', $staff_id, '', '', '', '', '', '', '', '', '', 'appointment_count_show');
+                }
+                if ($client_list != '') {
+                    return Datatables::of($client_list)->addIndexColumn()
+                        ->addColumn('action', function ($row) {
+                            $btn = '<div class="client-action"><a href="client_edit-' . $row->id . '" class="client-action-edit btn btn-icon rounded-circle glow btn-warning" data-tooltip="Edit">
+                            <i class="bx bx-edit"></i>
+                        </a><div class="save_lead_div" style="display:none;">
+                            <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-success save_lead_type" data-tooltip="Save Lead Type">
+                                <i class="bx bx-save"></i>
+                            </button>
+                            <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-danger close_lead_type" data-tooltip="Close Lead Type">
+                                <i class="bx bx-window-close"></i>
+                            </button>
+                        </div>
+                        <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-primary change_lead_type" data-tooltip="Change Lead Type">
+                            <i class="bx bx-analyse"></i>
+                        </button>';
+                            $btn .= '</div>';
+                            return $btn;
+                        })
+                        ->rawColumns(['action'])
+                        ->editColumn('created_at', function ($data) {
+                            return date('d-m-Y', strtotime($data->created_at));
+                        })
+                        ->editColumn('assigned_at', function ($data) {
+                            return date('d-m-Y', strtotime($data->assigned_at));
+                        })
+                        ->make(true);
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'statistics') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    Log::info('page ' . $page);
+                    Log::info('client_id ' . json_encode($request->client_id));
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, '', '', $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } elseif (($request->from_date != '' && $request->to_date != '') || $request->address != '' || $request->staff_id != '' || $request->source != '' || $request->city != '' || $request->status != '' || $request->lead_type != '') {
+                    if ($request->from_date == '' && $request->to_date == '') {
+                        $from_date = '';
+                        $to_date = '';
+                    } else {
+                        $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                        $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+                    }
+                    $client_list = $this->get_clients_leads_list($company, 'leads', $request->status, $request->staff_id, '', '', '', $request->source, $from_date, $to_date, $request->address, $request->city, $request->lead_type, 'appointment_count_show');
+                } else {
+                    $client_list = $this->get_clients_leads_by_status($company, $client_leads, '');
+                }
+
+                if ($client_list != '') {
+                    return Datatables::of($client_list)->addIndexColumn()
+                        ->addColumn('action', function ($row) {
+                            $btn = '<div class="row client-action ml-0"><a href="client_edit-' . $row->id . '" class="client-action-edit btn btn-icon rounded-circle glow btn-warning" data-tooltip="Edit">
+                            <i class="bx bx-edit"></i>
+                        </a>';
+                            if (session('role_id') == 1 || session('role_id') == 3) {
+                                $btn .= '<a href="#" class="btn btn-icon rounded-circle glow btn-danger delete_client" data-id="' . $row->id . '" data-tooltip="Delete">
+                            <i class="bx bx-trash-alt"></i>
+                        </a>
+                         <button href="#" data-client_id="' . $row->id . '" class="btn btn-icon rounded-circle glow btn-secondary convert_client" data-tooltip="Convert to client">
+                            <i class="bx bx-transfer"></i>
+                        </button>';
+                            }
+                            $btn .= '</div>';
+                            return $btn;
+                        })
+                        ->rawColumns(['action'])
+                        ->make(true);
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else if ($page == 'client') {
+                if ($request->client_id != '' && sizeof($request->client_id)) {
+                    Log::info($client_leads);
+                    Log::info($status);
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, $status, '', $request->client_id, '', '', '', '', '', '', '', '', 'appointment_count_show');
+                } else {
+                    $client_list = $this->get_clients_leads_list($company, $client_leads, $status, '', '', '', '', '', '', '', '', '', '', 'appointment_count_show');
+                }
+                if ($client_list != '') {
+                    if ($request->wantsJson()) {
+                        return response()->json(array('status' => 'success', 'response' => $client_list));
+                    }
+                    return view('pages.clients.get_clients', compact('client_list', 'staff', 'selection_val'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return response()->json(array('error' => 'Error'));
+        }
+    }
+
+    public function lead_complete(Request $request)
+    {
+        try {
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $city = $request->city;
+            $address = $request->address;
+            $leads_name = $request->leads_name;
+            $lead_id = $request->lead_id;
+
+            $from_date = '';
+            $to_date = '';
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($request->from_date == '' && $request->to_date == '') {
+                $from_date = '';
+                $to_date = '';
+            } else {
+                $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+            }
+
+            $j = 0;
+
+            for ($i = 0; $i < sizeof($lead_id); $i++) {
+                $update_complete = DB::table('leads')->where('id', $lead_id[$i])->update([
+                    'complete' => 'yes'
+                ]);
+                if ($update_complete) {
+                    $j++;
+                }
+            }
+            $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type');
+
+            if ($leads_name != '') {
+                $new_leads_list = $new_leads_list->whereIn('leads.id', $leads_name);
+            }
+            if ($from_date != '' && $to_date != '') {
+                $new_leads_list = $new_leads_list->whereBetween('leads.created_at', [$from_date, $to_date]);
+            }
+            if ($city != '') {
+                $new_leads_list = $new_leads_list->where('leads.city', 'LIKE', "%{$city}%");
+            }
+            if ($address != '') {
+                $new_leads_list = $new_leads_list->where('leads.address', 'LIKE', "%{$address}%");
+            }
+            $new_leads_list = $new_leads_list->where("leads.status", null)->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy('leads.id', 'desc')->get();
+
+            if ($j == $i) {
+                if ($new_leads_list != '') {
+                    return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            } else {
+                return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+    public function lead_delete(Request $request)
+    {
+        try {
+            $status = $request->status;
+            $selection_val = $request->selection_val;
+            $client_leads = $request->client_leads;
+            $page = $request->page;
+            $city = $request->city;
+            $address = $request->address;
+            $leads_name = $request->leads_name;
+            $lead_id = $request->lead_id;
+
+            $from_date = '';
+            $to_date = '';
+            $leadtype = DB::table('lead_type')->select('id', 'type')->get();
+            $staff = $this->get_staff_list_userid();
+            if ($request->from_date == '' && $request->to_date == '') {
+                $from_date = '';
+                $to_date = '';
+            } else {
+                $from_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->from_date)));
+                $to_date = date('Y-m-d', strtotime(str_replace('/', '-', $request->to_date)));
+            }
+
+            $j = 0;
+
+            for ($i = 0; $i < sizeof($lead_id); $i++) {
+                $delete_complete = DB::table('leads')->where('id', $lead_id[$i])->delete();
+                if ($delete_complete) {
+                    $j++;
+                }
+            }
+
+
+
+            if ($j == $i) {
+                $new_leads_list = DB::table('leads')->leftjoin('company', 'company.id', 'leads.company')->leftjoin('lead_type', 'lead_type.id', 'leads.lead_type');
+
+                if ($leads_name != '') {
+                    $new_leads_list = $new_leads_list->whereIn('leads.id', $leads_name);
+                }
+                if ($from_date != '' && $to_date != '') {
+                    $new_leads_list = $new_leads_list->whereBetween('leads.created_at', [$from_date, $to_date]);
+                }
+                if ($city != '') {
+                    $new_leads_list = $new_leads_list->where('leads.city', 'LIKE', "%{$city}%");
+                }
+                if ($address != '') {
+                    $new_leads_list = $new_leads_list->where('leads.address', 'LIKE', "%{$address}%");
+                }
+                $new_leads_list = $new_leads_list->where("leads.status", null)->select('leads.*', 'company.company_name', 'lead_type.type')->orderBy('leads.id', 'desc')->get();
+                if ($new_leads_list != '') {
+                    return view('pages.clients.get_new_leads', compact('new_leads_list', 'staff', 'leadtype'));
+                } else {
+                    return json_encode(array('status' => 'fail', 'msg' => 'Something went wrong while get clients !!'));
+                }
+            }
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        } catch (Exception $e) {
+            Log::error($e->getMessage());
+            return redirect()->back()->with('alert-danger', 'something went wrong. please try again');
+        }
+    }
+
+    public function leads_timeline(Request $request)
+    {
+        try {
+            $clientId = $request->id;
+            $client = DB::table('clients')
+                ->where('id', $clientId)
+                ->select('id', 'client_name', 'case_no', 'created_at')
+                ->first();
+
+            $mergedRecordsByDate = [];
+            $appointments = DB::table('appointment')
+                ->join('staff', 'staff.sid', 'appointment.meeting_with')
+                ->where('client', $clientId)
+                ->select('meeting_date', 'staff.name as meetname')
+                ->get();
+
+
+            foreach ($appointments as $appointment) {
+                $date = $appointment->meeting_date;
+                $staffNames = !empty($appointment->meetname) ? array_map('trim', explode(',', $appointment->meetname)) : [];
+
+                if (isset($mergedRecordsByDate[$date])) {
+                    $appointmentExists = false;
+                    foreach ($mergedRecordsByDate[$date] as &$record) {
+                        if ($record['title'] === 'APPOINTMENTS') {
+                            $appointmentExists = true;
+                            $record['staff_name'] = array_merge($record['staff_name'], $staffNames);
+                            break;
+                        }
+                    }
+                    if (!$appointmentExists) {
+                        $mergedRecordsByDate[$date][] = [
+                            'title' => 'APPOINTMENTS',
+                            'staff_name' => $staffNames,
+                            'method' => [],
+                            'services' => [],
+                        ];
+                    }
+                } else {
+                    $mergedRecordsByDate[$date] = [
+                        [
+                            'title' => 'APPOINTMENTS',
+                            'staff_name' => $staffNames,
+                            'method' => [],
+                            'services' => [],
+                        ]
+                    ];
+                }
+            }
+
+            $followUps = DB::table('follow_up')
+                ->select('followup_date', 'method')
+                ->where('client_id', $clientId)
+                ->get();
+
+            foreach ($followUps as $followUp) {
+                $date = $followUp->followup_date;
+                $methods = !empty($followUp->method) ? array_map('trim', explode(',', $followUp->method)) : [];
+                if (isset($mergedRecordsByDate[$date])) {
+                    $followupExists = false;
+                    foreach ($mergedRecordsByDate[$date] as &$record) {
+                        if ($record['title'] === 'FOLLOW-UPS') {
+                            $followupExists = true;
+                            $record['method'] = array_merge($record['method'], $methods);
+                            break;
+                        }
+                    }
+                    if (!$followupExists) {
+                        $mergedRecordsByDate[$date][] = [
+                            'title' => 'FOLLOW-UPS',
+                            'staff_name' => [],
+                            'method' => $methods,
+                            'services' => [],
+                        ];
+                    }
+                } else {
+                    $mergedRecordsByDate[$date] = [
+                        [
+                            'title' => 'FOLLOW-UPS',
+                            'staff_name' => [],
+                            'method' => $methods,
+                            'services' => [],
+                        ]
+                    ];
+                }
+            }
+
+            $proformaInvoices = DB::table('proforma_invoice')
+                ->select('bill_date', 'service', 'amount', 'quotation', 'total_amount')
+                ->where('client', $clientId)
+                ->get();
+
+            foreach ($proformaInvoices as $invoice) {
+                $date = $invoice->bill_date;
+                $services = [];
+                $services_arr = json_decode($invoice->service);
+                $amount_arr = json_decode($invoice->amount);
+
+                if (!empty($services_arr)) {
+                    foreach ($services_arr as $key => $service_id) {
+                        $service_name = DB::table('services')->where('id', $service_id)->value('name');
+                        if ($service_name) {
+                            $amount = isset($amount_arr[$key]) ? $amount_arr[$key] : 0;
+                            $formatted_amount = number_format($amount, 2, '.', ',');
+                            $service_details = "$service_name - <span style=\"font-weight:900\"> $formatted_amount</span>&nbsp;";
+                            $services[] = $service_details;
+                        }
+                    }
+                } else {
+                    $quotation_array = json_decode($invoice->quotation);
+                    foreach ($quotation_array as $key => $quotation_id) {
+                        $service_id = DB::table('quotation_details')->where('id', $quotation_id)->value('task_id');
+                        $service_name = DB::table('services')->where('id', $service_id)->value('name');
+                        if ($service_name) {
+                            $amount = isset($amount_arr[$key]) ? $amount_arr[$key] : 0;
+                            $formatted_amount = number_format($amount, 2, '.', ',');
+                            $service_details = "$service_name - <span style=\"font-weight:900\"> $formatted_amount</span>&nbsp;";
+                            $services[] = $service_details;
+                        }
+                    }
+                }
+
+                if (isset($mergedRecordsByDate[$date])) {
+                    $invoiceExists = false;
+
+                    foreach ($mergedRecordsByDate[$date] as &$record) {
+                        if ($record['title'] === 'PROFORMA-INVOICES') {
+                            $invoiceExists = true;
+                            $record['services'] = array_merge($record['services'], $services);
+                            break;
+                        }
+                    }
+
+                    if (!$invoiceExists) {
+                        $mergedRecordsByDate[$date][] = [
+                            'title' => 'PROFORMA-INVOICES',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ];
+                    }
+                } else {
+                    $mergedRecordsByDate[$date] = [
+                        [
+                            'title' => 'PROFORMA-INVOICES',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ]
+                    ];
+                }
+            }
+
+            $quotations = DB::table('quotation')
+                ->join('quotation_details', 'quotation_details.quotation_id', '=', 'quotation.id')
+                ->join('services', 'services.id', '=', 'quotation_details.task_id')
+                ->select('send_date', 'services.name as task_name', 'quotation_details.amount')
+                ->where('quotation.client_id', $clientId)
+                ->get();
+
+            foreach ($quotations as $quotation) {
+                $date = $quotation->send_date;
+                $services = [];
+                $formatted_amount = number_format($quotation->amount, 2, '.', ',');
+                $services[] = "$quotation->task_name - <span style=\"font-weight:900\"> $formatted_amount</span>&nbsp;";
+
+                if (isset($mergedRecordsByDate[$date])) {
+                    $quotationExists = false;
+
+                    foreach ($mergedRecordsByDate[$date] as &$record) {
+                        if ($record['title'] === 'QUOTATIONS') {
+                            $quotationExists = true;
+                            $record['services'] = array_merge($record['services'], $services);
+                            break;
+                        }
+                    }
+
+                    if (!$quotationExists) {
+                        $mergedRecordsByDate[$date][] = [
+                            'title' => 'QUOTATIONS',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ];
+                    }
+                } else {
+                    $mergedRecordsByDate[$date] = [
+                        [
+                            'title' => 'QUOTATIONS',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ]
+                    ];
+                }
+            }
+
+            $bills = DB::table('bill')
+                ->select('id', 'bill_date', 'service', 'amount', 'quotation')
+                ->whereNotNull('quotation')
+                ->where('client', $clientId)
+                ->get();
+            foreach ($bills as $bill) {
+                $date = $bill->bill_date;
+                $services = [];
+                $services_arr = json_decode($bill->service);
+                $amount_arr = json_decode($bill->amount);
+                if (!empty($services_arr)) {
+                    foreach ($services_arr as $key => $service_id) {
+                        $service_name = DB::table('services')->where('id', $service_id)->value('name');
+                        if ($service_name) {
+                            $amount = isset($amount_arr[$key]) ? $amount_arr[$key] : 0;
+                            $formatted_amount = number_format($amount, 2, '.', ',');
+                            $service_details = "$service_name - <span style=\"font-weight:900\"> $formatted_amount</span>&nbsp;";
+                            $services[] = $service_details;
+                        }
+                    }
+                } else {
+                    $quotation_array = json_decode($bill->quotation);
+                    foreach ($quotation_array as $key => $quotation_id) {
+                        $service_id = DB::table('quotation_details')->where('id', $quotation_id)->value('task_id');
+                        $service_name = DB::table('services')->where('id', $service_id)->value('name');
+                        if ($service_name) {
+                            $amount = isset($amount_arr[$key]) ? $amount_arr[$key] : 0;
+                            $formatted_amount = number_format($amount, 2, '.', ',');
+                            $service_details = "$service_name - <span style=\"font-weight:900\"> $formatted_amount</span>&nbsp;";
+                            $services[] = $service_details;
+                        }
+                    }
+                }
+
+                if (isset($mergedRecordsByDate[$date])) {
+                    $billExists = false;
+                    foreach ($mergedRecordsByDate[$date] as &$record) {
+                        if ($record['title'] === 'PAYMENTS') {
+                            $billExists = true;
+                            $record['services'] = array_merge($record['services'], $services);
+                            break;
+                        }
+                    }
+
+                    if (!$billExists) {
+                        $mergedRecordsByDate[$date][] = [
+                            'title' => 'PAYMENTS',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ];
+                    }
+                } else {
+                    $mergedRecordsByDate[$date] = [
+                        [
+                            'title' => 'PAYMENTS',
+                            'staff_name' => [],
+                            'method' => [],
+                            'services' => $services,
+                        ]
+                    ];
+                }
+            }
+            ksort($mergedRecordsByDate);
+            // log::info($mergedRecordsByDate);
+            // exit;
+            return view('pages.clients.leads_timeline', ['client' => $client, 'mergedRecordsByDate' => $mergedRecordsByDate]);
+        } catch (QueryException $e) {
+            Log::error("Database error ! [" . $e->getMessage() . "]");
+            return response()->json(array('error' => 'Database error'));
+        }
+    }
+}

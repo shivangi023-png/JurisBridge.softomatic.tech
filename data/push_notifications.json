@@ -1,0 +1,107 @@
+{
+  "New_lead_assigned": {
+    "title": "New lead assigned",
+    "body": "You have been assigned a new Lead {case_no} {client_name}",
+    "click_action": "dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"leads"
+  },
+  "Quotation_Sent": {
+    "title": "Quotation Sent",
+    "body": "A new Quotation {quotation_id} has been sent to the Lead {case_no} {client_name} assigned to you.",
+    "click_action": "quotations",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"quotation"
+  },
+  "Quotation_Finalized": {
+    "title": "Quotation Finalized",
+    "body": "Quotation {quotation_id} has been finalized by your lead {case_no} {client_name}",
+    "click_action": "quotations",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"quotation"
+    
+  },  
+   "Quotation_Unfinalize": {
+    "title": "Quotation Unfinalize",
+    "body": "Quotation {quotation_id} has been Unfinalize by your lead {case_no} {client_name}",
+    "click_action": "quotations",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"quotation"
+  },
+  "Invoice_Raised": {
+    "title": "Invoice Raised",
+    "body": "Invoice of Amount Rs.{amount} has been raised to your Lead {case_no} {client_name}",
+    "click_action": "payment",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"invoice"
+  },
+  "Payment_Approved": {
+    "title": "Payment Approved",
+    "body": "Payment has been approved of Rs.{amount} Against Invoice no {invoice_no} by {case_no} {client_name}",
+    "click_action": "payment",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"payment"
+  },
+  "Payment_deposited": {
+    "title": "Payment Deposited",
+    "body": "Payment has been deposited of Rs.{amount} Against Invoice no: {invoice_no} by {case_no} {client_name}",
+    "click_action": "payment",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"payment"
+  },
+  "Appointment_Creation": {
+    "title": "Appointment Creation",
+    "body": "A new Appointment has been created for you on Dt ________ with Client __ By [Created By] _____ [Free / Paid]",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"appointment"
+  },
+  "Payment_Receivals": {
+    "title": "Payment Received",
+    "body": "A new payment has been Received of Rs.{amount} Against Invoice no: {invoice_no} by {case_no} {client_name}.Please Approve.",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "To Account Team Staff Only",
+    "module":"payment"
+  },
+  "No_Attendance": {
+    "title": "No Attendance",
+    "body": "It looks like you forget to Mark the attendance.Please do it now.",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"attendance"
+  },
+  "Daily_Consolidated_Report": {
+    "title": "Daily Consolidated Report",
+    "body": "Invoices Raised:_________ Payment Received:____________ Invoices Cancelled:___________ Meetings Scheduled:_______",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Admin",
+    "module":""
+  },
+  "Appointment_reminder": {
+    "title": "Appointment reminder",
+    "body": "Today’s appointments scheduled for you are ______. To check details click here.",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"appointment"
+  },
+  "Expenses_Reminder": {
+    "title": "Expenses Reminder",
+    "body": "It looks like you have not spent anything today. If yes please do the expenses entry to work account team on time approvals.",
+    "click_action": "https://karyarat2.0.dearsociety.in/dashboard",
+    "icon": "https://karyarat2.0.dearsociety.in/images/ico/favicon.ico",
+    "send": "Staff",
+    "module":"Expense"
+  }
+}
